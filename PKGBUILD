@@ -3,7 +3,7 @@
 # Single package: vibekeyd daemon + PySide6 Panel + vibekey-config CLI.
 pkgname=vibekey
 pkgver=0.1.0
-pkgrel=5
+pkgrel=6
 pkgdesc="Ulanzi AU05 keypad as a KDE/X11 control surface — daemon, Panel, dictation & agent Presets (port of jimmibram/vibekey-driver)"
 arch=('x86_64')
 url="https://github.com/jimOnAir/vibekey"
