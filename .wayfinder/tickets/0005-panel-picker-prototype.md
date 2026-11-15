@@ -48,7 +48,7 @@ window+tray, picker grouping, how "preview" is communicated.
 - **Picker = grouped-tile dialog + custom command / key-combo fields.**
 - **Button icon language: Ulanzi-style line art matching the physical caps** —
   **mic cap: plain mic glyph, no arcs**; **accept/cancel caps: a central
-  glyph (slash / cross) between two open arcs, the split rotated 45°** (gap
+  glyph (check / cross) between two open arcs, the split rotated 45°** (gap
   diagonal, per owner's unit); knob turn = open-ring ↺ ↻ arrows. Uniform
   graphite strokes, rounded caps/join, invert to white on press. Renderers
   `draw_mic/draw_check/draw_cross/draw_turn` + `_arcs(rot=)` + `line_icon()`
