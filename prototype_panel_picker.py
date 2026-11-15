@@ -26,7 +26,7 @@ from PySide6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QPainter,
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFrame, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
-    QMenu, QMessageBox, QPushButton, QStatusBar,
+    QMenu, QMessageBox, QPlainTextEdit, QPushButton, QStatusBar,
     QSystemTrayIcon, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -226,18 +226,21 @@ class KeypadWidget(QFrame):
         self.setFixedSize(self.W, self.H)
         spec = [  # (key, icon, cx, cy, r) — zones over the drawn art
             ("knob_press", "", 74, 75, 36),
-            ("voice", "⏻", 168, 75, 24),
-            ("confirm", "⊘", 233, 75, 24),
-            ("cancel", "⊗", 298, 75, 24),
+            ("voice", "🎙", 168, 75, 24),
+            ("confirm", "✓", 233, 75, 24),
+            ("cancel", "✕", 298, 75, 24),
         ]
         for key, icon, cx, cy, r in spec:
             b = SimButton(model, key, icon, edit_cb, self)
             b.setFlat(True)
+            size = 15 if key == "voice" else 19
             b.setStyleSheet(
-                "QPushButton{background:transparent;border:none;font-size:19px;color:#55585e}"
-                "QPushButton:pressed{background:rgba(61,132,246,150);border-radius:%dpx;color:white}" % r)
+                "QPushButton{background:transparent;border:none;font-size:%dpx;color:#55585e}"
+                "QPushButton:pressed{background:rgba(61,132,246,150);border-radius:%dpx;color:white}" % (size, r))
             b.setGeometry(cx - r, cy - r, 2 * r, 2 * r)
-            b.setToolTip(dict(CONTROLS)[key] if key in dict(CONTROLS) else "Knob (hold ≥%d ms = Enter)" % LONG_MS)
+            tip = {"voice": "🎙 Voice key (mic)", "confirm": "✓ accept",
+                   "cancel": "✕ cancel"}.get(key, f"Knob — hold ≥{LONG_MS} ms = Enter")
+            b.setToolTip(tip)
         for key, dx in (("knob_l", -1), ("knob_r", 1)):
             b = SimButton(model, key, "⟲" if dx < 0 else "⟳", None, self)
             b.setFlat(True)
@@ -309,9 +312,9 @@ class VariantA(BaseWindow):
         body.addLayout(left)
         left.addWidget(KeypadWidget(model, self.edit_assignment))
         left.addWidget(QLabel(
-            "drawn to the real AU05 — press the drawing to simulate, double-click to edit.<br>"
-            "icon↔Control mapping assumed <b>⏻ = Voice · ⊘ = ✓ Confirm · ⊗ = ✕ Cancel</b>;<br>"
-            "the long ⊗ end-bar is <b>unmapped in v1</b> — press it on your unit: is it a key?"))
+            "front panel: <b>🎙 mic · ✓ accept · ✕ cancel</b> + knob (per your unit).<br>"
+            "press the drawing to simulate, double-click to edit.<br>"
+            "the long ⊗ end-bar: decorative or a 4th key? — settle it with the <b>probe</b>."))
         left.addStretch(1)
 
         ovl = QVBoxLayout()
@@ -503,6 +506,45 @@ class VariantC(BaseWindow):
         self.toast.setText(self.model.log[-1] if self.model.log else "")
 
 
+PROBE_LOG = "/tmp/opencode/au05-probe.log"
+
+
+class ProbeWindow(QMainWindow):
+    """Focus me + press the REAL keypad: logs every X key event, press and
+    release, with timestamps → /tmp/opencode/au05-probe.log."""
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("PROBE — click me, then press the real AU05")
+        self.setWindowFlags(Qt.WindowStaysOnTopHint)
+        self.resize(560, 300)
+        self.move(620, 300)
+        self.area = QPlainTextEdit()
+        self.area.setReadOnly(True)
+        self.setCentralWidget(self.area)
+        self.show()
+
+    def _log(self, ev, edge):
+        from datetime import datetime
+        try:
+            name = str(Qt.Key(ev.key()).name)
+        except ValueError:
+            name = f"0x{ev.key():x}"
+        mods = f" +{'-'.join(m.name.replace('Modifier', '').lower() for m in ev.modifiers() if m)}" if int(ev.modifiers()) else ""
+        rep = " (auto-repeat)" if ev.isAutoRepeat() else ""
+        txt = f" text={ev.text()!r}" if (edge == "PRESS" and ev.text() and ev.text().isprintable()) else ""
+        line = f"{datetime.now():%H:%M:%S.%f} {edge:6s} {name}{mods}{txt}{rep}"
+        self.area.appendPlainText(line)
+        with open(PROBE_LOG, "a") as f:
+            f.write(line + "\n")
+
+    def keyPressEvent(self, e):
+        self._log(e, "PRESS")
+
+    def keyReleaseEvent(self, e):
+        self._log(e, "RELEASE")
+
+
 class App:
     VARIANTS = {"A": VariantA, "B": VariantB, "C": VariantC}
 
@@ -545,16 +587,24 @@ class App:
         lay = QHBoxLayout(pill)
         self.pill_label = QLabel()
         b1, b2, st = QPushButton("◀"), QPushButton("▶"), QPushButton("state")
+        pr = QPushButton("probe")
         b1.clicked.connect(self.prev)
         b2.clicked.connect(self.next)
+        pr.clicked.connect(self.show_probe)
         st.clicked.connect(lambda: QMessageBox.information(None, "fake state", self.model.dump()))
-        for w in (b1, self.pill_label, b2, st):
+        for w in (b1, self.pill_label, b2, pr, st):
             lay.addWidget(w)
         pill.adjustSize()
         scr = QApplication.primaryScreen().availableGeometry()
         pill.move(scr.center().x() - pill.width() // 2, scr.bottom() - pill.height() - 24)
         pill.show()
         return pill
+
+    def show_probe(self):
+        if not getattr(self, "probe", None):
+            self.probe = ProbeWindow()
+        self.probe.raise_()
+        self.probe.activateWindow()
 
     def make_tray(self):
         pm = QPixmap(32, 32)
