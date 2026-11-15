@@ -44,9 +44,14 @@ window+tray, picker grouping, how "preview" is communicated.
   mode-cycle vs Enter pair.
 - **Picker = grouped-tile dialog + custom command / key-combo fields.**
 - **Tray icon + menu** for re-showing the Panel; *Preview* is a
-  checkbox in the Panel, default on. Final icon: **purple drop with a white
-  `u`, point down** (Ulanzi); earlier takes rejected — blue "VK" monogram
-  (reads as VKontakte) and the graphite knob glyph.
+  checkbox in the Panel, default on. Final icon: **glossy purple circle with
+  a white centered `U`** (radial gradient, upper sheen, darker rim) — legible
+  at 32 px on dark trays. Journey: blue "VK" monogram ✗ (VKontakte clash) →
+  knob glyph ✗ → purple drop family ✗ (11 variants explored; drop idea
+  archived on `prototype/panel-picker`, renderers `icon_variants.py` +
+  `render_icon_preview.py` there). Canonical renderer: `draw_app_icon()` —
+  the package should ship this as SVG/PNGs (hicolor + `.desktop`), a task for
+  *Packaging & install spec*.
 - Rejected for v1: C's windowless HUD, B's reorderable mode list (mode list
   stays config-editable, header shows the current one).
 
