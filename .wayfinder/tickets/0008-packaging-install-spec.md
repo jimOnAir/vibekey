@@ -2,7 +2,7 @@
 title: "Packaging & install spec"
 type: wayfinder:grilling
 status: open
-assignee:
+assignee: jimOnAir
 blocked-by:
   - 0001-upstream-port-audit.md
 ---
