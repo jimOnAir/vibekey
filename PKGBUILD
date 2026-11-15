@@ -40,6 +40,10 @@ EOF
   install -Dm644 sysusers/vibekey.conf          "$pkgdir/usr/lib/sysusers.d/vibekey.conf"
   install -Dm644 LICENSE                        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 README.md                      "$pkgdir/usr/share/doc/$pkgname/README.md"
+  local page
+  for page in docs/*.md; do
+    install -Dm644 "$page" "$pkgdir/usr/share/doc/$pkgname/$(basename "$page")"
+  done
   local size
   for size in 16 22 24 32 48 64 128 256; do
     install -Dm644 "panel/icons/${size}x${size}/vibekey.png" \

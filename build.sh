@@ -65,6 +65,9 @@ need=(
   /usr/lib/udev/rules.d/70-ulanzi-vibekey.rules
   /usr/lib/sysusers.d/vibekey.conf
   /usr/share/applications/vibekey-panel.desktop
+  /usr/share/doc/vibekey/README.md
+  /usr/share/doc/vibekey/getting-started.md
+  /usr/share/doc/vibekey/lighting.md
   /usr/share/icons/hicolor/32x32/apps/vibekey.png
   /usr/share/icons/hicolor/scalable/apps/vibekey.svg
   /usr/share/licenses/vibekey/LICENSE
