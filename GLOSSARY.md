@@ -65,3 +65,19 @@ _Avoid_: control panel, widget, bar plugin
 An OpenCode conversation running in a terminal; agent presets move focus
 between Sessions.
 _Avoid_: window, tab
+
+**Host**:
+The window or terminal where a Session runs; a Session step raises its Host.
+_Avoid_: container, pane
+
+**Ring**:
+The Daemon's ordered cycle it steps through for *next/previous Session*.
+_Avoid_: carousel, list, queue
+
+**Cursor**:
+The Daemon's position in the Ring; may drift from what the user views manually.
+_Avoid_: pointer, index
+
+**Knob mode**:
+The active Preset for knob-turn; cycled by knob press.
+_Avoid_: knob setting, dial mode

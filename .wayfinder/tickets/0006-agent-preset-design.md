@@ -1,7 +1,7 @@
 ---
 title: "Agent-preset design for OpenCode/Orca"
 type: wayfinder:grilling
-status: open
+status: closed
 assignee: jimOnAir
 blocked-by:
   - 0003-opencode-surface.md
@@ -33,3 +33,36 @@ This ticket settles mechanics and edge behaviour:
   Sessions, Session id stale, Orca not running mid-cycle.
 - The Daemon's service discovery: read `~/.local/state/opencode/service.json`
   for port + Basic auth? Refresh policy when the service restarts.
+
+## Answer
+
+All decisions accepted by the dev (grilling, 2026-11-15):
+
+- **Control map**: ✓ Confirm = *next Session* (fixed), ✕ Cancel = *interrupt*
+  (fixed), knob **press** = cycle Knob mode, knob **long-press** (≥400 ms,
+  measured on the release edge) = Enter injection, knob **turn** = active Knob
+  mode's Preset.
+- **Knob mode**: user-configured ordered list of turn-Presets, default
+  `Scroll, Sessions, Volume`. Runtime state — resets to Scroll at boot. Every
+  switch announces itself (`notify-send` + tray state). Mode-scoped ✓/✕
+  declined for v1 (→ map *Out of scope*).
+- **Session cycle**: one step = one root Session in the **Ring** (from the
+  service API); step effect = raise that Session's **Host**. Host resolution:
+  Orca — match `terminal list --json` row by `title == "OC | " + api.title`,
+  fall back to directory match, then `orca terminal switch`; plain terminal —
+  `wmctrl -a` on the `OC | ` title. **Cursor drift** from manual sidebar /
+  `ctrl+tab` switches is accepted for v1 (no title-resync); no `ctrl+tab`
+  Preset.
+- **Interrupt (✕)**: hybrid target — the focused window's Session when
+  resolvable (title or Orca row match), else the Cursor's Session; the resolved
+  target is named in the status report. Mechanism order:
+  `POST /api/session/{id}/interrupt` (idempotent) → `orca terminal send
+  --interrupt` → **Esc keystroke; never Ctrl+C** (empty-prompt `app.exit`).
+- **Standalone TUIs**: out of v1 entirely (API-opaque — invisible to the Ring,
+  un-interruptable). Documented known gap.
+- **Failure/status surface**: `notify-send` + tray icon state (works with the
+  Panel closed): service down, zero root Sessions, stale Session id (skip to
+  next valid), Orca not running mid-cycle, injection fired but unverifiable.
+- **Service discovery**: read `~/.local/state/opencode/service.json`;
+  ~5 s cache, one re-read + retry on auth failure; "service not running" is
+  declared only after the retry fails.

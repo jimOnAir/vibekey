@@ -42,6 +42,7 @@ sessions; nothing on this map builds it.
 
 <!-- one line per closed ticket: name + gist + link -->
 
+- [Agent-preset design for OpenCode/Orca](tickets/0006-agent-preset-design.md): ✓ = *next Session* and ✕ = *interrupt* fixed; knob press cycles **Knob mode** (default `Scroll, Sessions, Volume`, resets at boot), long-press = Enter; cycle steps the **Ring** of root Sessions, raising each **Host** (Orca `terminal switch` / `wmctrl`); interrupt is hybrid-target (focused window else Cursor), API-first, **never Ctrl+C**; standalone TUIs excluded from v1.
 - [OpenCode automation surface](tickets/0003-opencode-surface.md): on v2.2.7 all three agent ops have mechanisms — *interrupt* is a first-class idempotent `POST /api/session/{id}/interrupt` (keystroke fallback Esc only, **never Ctrl+C**); *next/prev* must be composed (API session ring of `ses_…` ids + host resolution via Orca row match or `OC | ` window title); no route publishes `tui.session.select`, and `--standalone` TUIs are API-opaque (title/window route only). Findings on `research/opencode-surface`.
 - [handy on X11/Arch](tickets/0002-handy-x11-arch.md): Dictation is feasible — Daemon injects a hold-pair (`xdotool keydown/keyup ctrl+alt+space`) against handy's **Tauri** `push_to_talk` mode (XTEST activates root-window grabs; press+release edges delivered). Pin the `tauri` backend (`handy_keys` never sees XTEST); ~0.5–2 s Parakeet latency; AUR `handy` 0.10.1 packages cleanly on Arch. Findings on `research/handy-x11-arch`.
 - [Upstream port audit: compositor-independence check](tickets/0001-upstream-port-audit.md): daemon core verified compositor-independent on X11 (`EVIOCGRAB` silences libinput; hidraw reads stay complete during Grab) → **keep**; replace wtype→`xdotool`, Quickshell Panel, Omarchy preset catalogue, and the udev rule — uaccess loses the Dongle re-enumeration race → static `MODE="0660", GROUP="vibekey"` rule + `sysusers.d`. Findings on `research/upstream-port-audit`.
@@ -72,3 +73,6 @@ sessions; nothing on this map builds it.
 - **Omarchy marketplace listing** — upstream already owns that.
 - **AUR submission** — a `PKGBUILD` living in the repo is in scope; publishing
   to AUR is a later, separate effort.
+- **Mode-scoped ✓/✕ sets** (✓/✕ following the current Knob mode) — richer
+  model than v1 needs; declined in *Agent-preset design for OpenCode/Orca*,
+  post-v1 candidate.
