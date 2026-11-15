@@ -14,8 +14,17 @@ the finger — no coupling into handy's pipeline).
 
 Settle:
 
-- press → record-start, release → record-stop wired via the chosen mechanism
-  (hotkey injection vs otherwise, per the handy research answer).
-- behaviour when handy is not running, and what the panel/OSD says.
-- how injected hotkeys survive the daemon's own grab and X11 focus state.
-- the latency budget a user can tolerate between release and text.
+- Chord ownership: the Preset carries its own `ctrl+alt+space` (or
+  user-configured chord) — how is the chord configured per Assignment, and
+  what guarantees it matches handy's configured hotkey (defaults aligned;
+  does the Panel detect/repair a mismatch, or only warn)?
+- Pin handy's `keyboard_implementation = tauri` (the `handy_keys` backend
+  never sees XTEST) — is that a documented precondition, a Panel check, or
+  both?
+- `push_to_talk` mode required; `hold_or_toggle`'s 300 ms threshold rejected
+  or kept as a user option? Fallback policy when injection fails: toggle via
+  CLI (`handy --toggle-transcription`) / `SIGUSR2`, or refuse and report?
+- behaviour when handy is not running, and what the Panel/OSD says.
+- Panel guidance for the two handy settings that shape perceived quality:
+  `always_on_microphone` (first-syllable clipping) and overlay-off.
+- Latency expectation to publish: ~0.5–2 s key-up→text (Parakeet, CPU/Vulkan).

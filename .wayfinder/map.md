@@ -42,6 +42,7 @@ sessions; nothing on this map builds it.
 
 <!-- one line per closed ticket: name + gist + link -->
 
+- [handy on X11/Arch](tickets/0002-handy-x11-arch.md): Dictation is feasible — Daemon injects a hold-pair (`xdotool keydown/keyup ctrl+alt+space`) against handy's **Tauri** `push_to_talk` mode (XTEST activates root-window grabs; press+release edges delivered). Pin the `tauri` backend (`handy_keys` never sees XTEST); ~0.5–2 s Parakeet latency; AUR `handy` 0.10.1 packages cleanly on Arch. Findings on `research/handy-x11-arch`.
 - [Upstream port audit: compositor-independence check](tickets/0001-upstream-port-audit.md): daemon core verified compositor-independent on X11 (`EVIOCGRAB` silences libinput; hidraw reads stay complete during Grab) → **keep**; replace wtype→`xdotool`, Quickshell Panel, Omarchy preset catalogue, and the udev rule — uaccess loses the Dongle re-enumeration race → static `MODE="0660", GROUP="vibekey"` rule + `sysusers.d`. Findings on `research/upstream-port-audit`.
 - [Orca CLI surface](tickets/0004-orca-surface.md): *Orca next-worktree* Preset is CLI-clean — `worktree activate` + `terminal switch` cover it, only window-raise falls to X11 (`wmctrl` by `orca-ide` PID); the Daemon must own the cycle cursor (Orca exposes no "which workspace is displayed" query) and re-list terminal handles per fire. Findings on `research/orca-surface`.
 
