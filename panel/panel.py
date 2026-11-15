@@ -680,6 +680,14 @@ class PanelWindow(QMainWindow):
         self.banner.setText(problem or last_error or "")
         self.banner.setVisible(bool(problem or last_error))
 
+        # an idle status line would say "waiting for the Daemon…" even while the
+        # Daemon is alive and reporting — when it is, say what is actually missing
+        if not st.get("connected"):
+            self.set_status({"absent": "Daemon is up — but the Dongle is not on USB (plug it in)",
+                             "denied": "Daemon is up — no permission to read the Dongle (see Troubleshooting)",
+                             "unexpected": "Dongle interface layout changed — Daemon refused to grab it",
+                             "stopped": "Daemon is shutting down…"}.get(access, "Daemon not connected yet"))
+
         config = read_json(CONFIG_PATH, {}) or {}
         if config != self.config:
             self.config = config
