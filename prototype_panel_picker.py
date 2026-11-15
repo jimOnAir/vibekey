@@ -579,7 +579,7 @@ def draw_mic(p, s, color):
     tail; NO base line."""
     k = s / 28.0
     p.setPen(_pen(color, 2.1 * k)); p.setBrush(Qt.NoBrush)
-    p.drawRoundedRect(11.6 * k, 4.6 * k, 4.8 * k, 9.8 * k, 2.4 * k, 2.4 * k)
+    p.drawRoundedRect(11.3 * k, 4.6 * k, 5.4 * k, 9.8 * k, 2.7 * k, 2.7 * k)
     path = QPainterPath(); path.moveTo(9.6 * k, 10.6 * k)
     path.cubicTo(9.6 * k, 18.6 * k, 18.4 * k, 18.6 * k, 18.4 * k, 10.6 * k)
     p.drawPath(path)
