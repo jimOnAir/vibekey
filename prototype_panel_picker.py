@@ -612,14 +612,14 @@ class App:
         pm.fill(Qt.transparent)
         p = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing)
-        # purple drop with a "u" (Ulanzi) — drop = overlapping triangle + circle
+        # purple drop with a "u" (Ulanzi), point down: circle + downward triangle
         p.setPen(Qt.NoPen)
         p.setBrush(QColor("#7c3aed"))
-        p.drawPolygon(QPolygonF([QPointF(16, 2), QPointF(7.2, 15.5), QPointF(24.8, 15.5)]))
-        p.drawEllipse(5, 9, 22, 22)
+        p.drawPolygon(QPolygonF([QPointF(16, 30), QPointF(6.5, 12.5), QPointF(25.5, 12.5)]))
+        p.drawEllipse(5, 1, 22, 22)
         p.setPen(QColor("white"))
         p.setFont(QFont("sans", 12, QFont.Bold))
-        p.drawText(QRectF(5, 8, 22, 23), Qt.AlignCenter, "u")
+        p.drawText(QRectF(5, -1, 22, 24), Qt.AlignCenter, "u")
         p.end()
         icon = QIcon(pm)
         self.app.setWindowIcon(icon)
