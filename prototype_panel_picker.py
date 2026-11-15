@@ -21,7 +21,7 @@
 import json
 import sys
 
-from PySide6.QtCore import Qt, QElapsedTimer, QPointF
+from PySide6.QtCore import Qt, QElapsedTimer, QPointF, QRectF
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFrame, QGridLayout, QHBoxLayout,
@@ -607,22 +607,19 @@ class App:
         self.probe.activateWindow()
 
     def make_tray(self):
-        import math
+        from PySide6.QtGui import QPolygonF
         pm = QPixmap(32, 32)
         pm.fill(Qt.transparent)
         p = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing)
-        # AU05 knob glyph: graphite dial, pointer notch, grip ticks — not a monogram
-        p.setPen(QPen(QColor("#3a3d42"), 2))
-        p.setBrush(QColor("#e8e9eb"))
-        p.drawEllipse(5, 5, 22, 22)
-        p.setPen(QPen(QColor("#8f9297"), 1.6))
-        for ang in (30, 90, 150, 210, 270, 330):
-            x1, y1 = 16 + 8.4 * math.cos(math.radians(ang)), 16 - 8.4 * math.sin(math.radians(ang))
-            x2, y2 = 16 + 10.2 * math.cos(math.radians(ang)), 16 - 10.2 * math.sin(math.radians(ang))
-            p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
-        p.setPen(QPen(QColor("#3d84f6"), 2.4, Qt.SolidLine, Qt.RoundCap))
-        p.drawLine(QPointF(16, 16), QPointF(16 + 6.5 * math.cos(math.radians(60)), 16 - 6.5 * math.sin(math.radians(60))))
+        # purple drop with a "u" (Ulanzi) — drop = overlapping triangle + circle
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#7c3aed"))
+        p.drawPolygon(QPolygonF([QPointF(16, 2), QPointF(7.2, 15.5), QPointF(24.8, 15.5)]))
+        p.drawEllipse(5, 9, 22, 22)
+        p.setPen(QColor("white"))
+        p.setFont(QFont("sans", 12, QFont.Bold))
+        p.drawText(QRectF(5, 8, 22, 23), Qt.AlignCenter, "u")
         p.end()
         icon = QIcon(pm)
         self.app.setWindowIcon(icon)
