@@ -108,6 +108,16 @@ Scroll pass-through requires the current **Knob mode** to be `Scroll`
 (cycle with a press — the tray glyph and a notification confirm) *and* the
 Panel window closed (Preview holds the wheel back on purpose).
 
+## `Quit` in the tray doesn't stick
+
+Quit stops the Panel process and nothing else — by design the **Daemon** keeps
+running (your Controls stay live). If the tray icon reappears a second later,
+something is *supervising* the Panel with a restart-always policy: the shipped
+setup (KDE autostart) does not, but a transient dev unit started with
+`systemd-run --property=Restart=always` does — relaunch it with
+`Restart=on-failure` instead. Bring the Panel back any time from the
+applications menu (**vibekey Panel**).
+
 ## Still stuck?
 
 The two files that explain everything: `$XDG_RUNTIME_DIR/vibekey/state.json`
