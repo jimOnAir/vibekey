@@ -1920,6 +1920,9 @@ class Daemon:
             os.unlink(POWER_PATH)
             if not isinstance(req, dict):
                 return
+            if "mic_enable" in req:
+                self.device.write_vendor(vendor_frame(
+                    bytes([0x01, 0x01, 0x2A, 0x00, 1 if req["mic_enable"] else 0])))
             if "standby_s" in req:
                 v = max(0, min(86400, int(req["standby_s"])))
                 self.device.write_vendor(vendor_frame(
