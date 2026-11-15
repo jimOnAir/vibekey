@@ -43,8 +43,10 @@ window+tray, picker grouping, how "preview" is communicated.
 - **Press vs long-press** (≥400 ms) felt right on the knob zone — keep as the
   mode-cycle vs Enter pair.
 - **Picker = grouped-tile dialog + custom command / key-combo fields.**
-- **Tray icon + menu** (VK glyph) for re-showing the Panel; *Preview* is a
-  checkbox in the Panel, default on.
+- **Tray icon + menu** for re-showing the Panel; *Preview* is a
+  checkbox in the Panel, default on. Icon must be an **AU05-knob glyph**
+  (graphite dial, pointer notch, grip ticks) — the prototype's blue "VK"
+  monogram was rejected (reads as the VKontakte brand).
 - Rejected for v1: C's windowless HUD, B's reorderable mode list (mode list
   stays config-editable, header shows the current one).
 
