@@ -59,6 +59,12 @@ catalogue.** Full evidence: [`research/upstream-port-audit`](https://github.com/
   `actions.json` *contents* (38 `omarchy-*` presets → KDE/handy/OpenCode), the
   udev rule, the Quickshell Panel + QML + IPC, `install.sh` (→ PKGBUILD), and
   `vibekey-herdr-agent`.
+- **Live confirmation (owner report + journal, 20:20:36–45)**: the Dongle
+  re-enumerates on a constant ~3.5 s cycle even with no input — it is the
+  documented watchdog, *not* knob-press-triggered; button presses that land in
+  a reboot window silently vanish, which is what "reconnects when I press the
+  knob" actually was. The Daemon holding both channels open (upstream design)
+  is the cure; implementers shouldn't chase a phantom knob bug.
 - **Top risks**: 🔴 no device access as currently configured (fixed only by the
   package rule) · 🔴 shipped defaults *are* Omarchy commands · 🔴 `xdotool`
   needs `DISPLAY`/`XAUTHORITY` in the user service (present via Plasma's env
