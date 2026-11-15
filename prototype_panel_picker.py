@@ -215,9 +215,11 @@ class BaseWindow(QMainWindow):
 
 class KeypadWidget(QFrame):
     """Drawn to match the real AU05 (ulanzi.com product photos): aluminium
-    bar, knob over the mic/speaker end, three round-capped keys in square
-    housings (⏻ ⊘ ⊗), long ⊗ end-bar, Vibekey logo. Interactive zones are
-    transparent SimButtons positioned over the art."""
+    bar; speaker mesh + Ulanzi logo + five mic slots at the far end;
+    aluminium knob with recessed ring groove (LED ring lives there) and grip
+    notches; three square white keycaps (mic / accept-slash / cancel-cross,
+    each a central glyph between two open arcs); strap hole at the edge.
+    Interactive zones are transparent SimButtons positioned over the art."""
 
     W, H = 470, 150
 
@@ -257,40 +259,45 @@ class KeypadWidget(QFrame):
 
     def paintEvent(self, e):
         import math
-        from PySide6.QtGui import QLinearGradient
+        from PySide6.QtGui import QLinearGradient, QRadialGradient
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         g = QLinearGradient(0, 0, 0, self.H)
         g.setColorAt(0, QColor("#e9eaec")); g.setColorAt(0.5, QColor("#d8dadc")); g.setColorAt(1, QColor("#c6c8cc"))
         p.setPen(QColor("#b3b5b9")); p.setBrush(g)
         p.drawRoundedRect(6, 6, self.W - 12, self.H - 12, 24, 24)
-        # knob with grip notches
-        p.setPen(QColor("#aeb0b4")); p.setBrush(QColor("#fafafa"))
+        # speaker mesh band at the far (left) end
+        p.setPen(Qt.NoPen); p.setBrush(QColor("#8f9297"))
+        for col in range(3):
+            for row in range(9):
+                p.drawEllipse(12 + col * 4.5, 22 + row * 12, 2.4, 2.4)
+        p.setPen(QColor("#7c7f85")); p.setFont(QFont("sans", 7))
+        p.drawText(34, 20, 60, 12, Qt.AlignLeft | Qt.AlignVCenter, "Ulanzi")
+        # mic slots between logo and knob
+        p.setPen(Qt.NoPen); p.setBrush(QColor("#9c9ea3"))
+        for i in range(5):
+            p.drawRoundedRect(62 + i * 7, 22, 3, 12, 1.5, 1.5)
+        # knob: recess groove + aluminium dome + dark grip ticks
+        p.setPen(QPen(QColor("#a4a6aa"), 2)); p.setBrush(QColor("#caced3"))
+        p.drawEllipse(74 - 46, 75 - 46, 92, 92)
+        kg = QRadialGradient(62, 62, 66, 62, 62)
+        kg.setColorAt(0, QColor("#ffffff")); kg.setColorAt(0.6, QColor("#e2e4e7")); kg.setColorAt(1, QColor("#c3c6ca"))
+        p.setPen(QColor("#aeb0b4")); p.setBrush(kg)
         p.drawEllipse(74 - 40, 75 - 40, 80, 80)
-        p.setPen(QColor("#b9bcc0"))
+        p.setPen(QPen(QColor("#8f9297"), 1.8))
         for ang in (60, 120, 240, 300):
             x1, y1 = 74 + 32 * math.cos(math.radians(ang)), 75 - 32 * math.sin(math.radians(ang))
             x2, y2 = 74 + 38 * math.cos(math.radians(ang)), 75 - 38 * math.sin(math.radians(ang))
-            p.drawLine(int(x1), int(y1), int(x2), int(y2))
-        # key housings (square rounded) + white round caps
+            p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+        # three square white keycaps in square housings
         for cx in (168, 233, 298):
-            p.setPen(QColor("#b6b8bc")); p.setBrush(QColor("#eceef0"))
+            p.setPen(QColor("#c3c5c9")); p.setBrush(QColor("#d6d8db"))
             p.drawRoundedRect(cx - 28, 75 - 28, 56, 56, 12, 12)
-            p.setPen(Qt.NoPen); p.setBrush(QColor("#fafafa"))
-            p.drawEllipse(cx - 22, 75 - 22, 44, 44)
-        # long end-bar with the same arc-wrapped cross motif
-        p.setPen(QColor("#b6b8bc")); p.setBrush(QColor("#eceef0"))
-        p.drawRoundedRect(340, 47, 112, 56, 14, 14)
-        p.save()
-        p.translate(396 - 22, 75 - 22)
-        draw_cross(p, 44, "#7c7f85")
-        p.restore()
-        # mic slots + logo near the knob end
-        p.setPen(Qt.NoPen); p.setBrush(QColor("#9c9ea3"))
-        for i in range(4):
-            p.drawRoundedRect(20 + i * 7, 20, 3, 10, 1.5, 1.5)
-        p.setPen(QColor("#8f9297")); p.setFont(QFont("sans", 7))
-        p.drawText(14, 128, 90, 12, Qt.AlignLeft, "Vibekey")
+            p.setPen(QColor("#c0c2c6")); p.setBrush(QColor("#fafafa"))
+            p.drawRoundedRect(cx - 23, 75 - 23, 46, 46, 10, 10)
+        # strap hole at the far (right) edge
+        p.setPen(QPen(QColor("#9c9ea3"), 1.5)); p.setBrush(QColor("#b9bcc0"))
+        p.drawRoundedRect(self.W - 18, 75 - 6, 8, 12, 4, 4)
         p.end()
 
 
@@ -320,9 +327,9 @@ class VariantA(BaseWindow):
         body.addLayout(left)
         left.addWidget(KeypadWidget(model, self.edit_assignment))
         left.addWidget(QLabel(
-            "front panel: <b>🎙 mic · ✓ accept · ✕ cancel</b> + knob (per your unit).<br>"
-            "press the drawing to simulate, double-click to edit.<br>"
-            "the long ⊗ end-bar: decorative or a 4th key? — settle it with the <b>probe</b>."))
+            "front panel per product photos: <b>mic · accept · cancel</b> square caps +<br>"
+            "aluminium knob (recessed ring = LED). press the drawing to simulate,<br>"
+            "double-click to edit; the <b>probe</b> settles what your unit really sends."))
         left.addStretch(1)
 
         ovl = QVBoxLayout()
@@ -577,12 +584,11 @@ def draw_mic(p, s, color):
 
 
 def draw_check(p, s, color):
+    """accept cap: diagonal slash (stylised check) between the two arcs."""
     k = s / 28.0
     _arcs(p, s, color)
     p.setPen(_pen(color, 2.4 * k)); p.setBrush(Qt.NoBrush)
-    path = QPainterPath(QPointF(11.3 * k, 14.4 * k))
-    path.lineTo(13.2 * k, 16.4 * k); path.lineTo(16.9 * k, 11.9 * k)
-    p.drawPath(path)
+    p.drawLine(QPointF(12.4 * k, 15.8 * k), QPointF(15.6 * k, 12.2 * k))
 
 
 def draw_cross(p, s, color):
