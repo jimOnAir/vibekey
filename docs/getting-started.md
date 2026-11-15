@@ -16,9 +16,10 @@ What you need, what to run, and how to see it working. Ten minutes, one reboot.
 
 ```bash
 git clone https://github.com/jimOnAir/vibekey && cd vibekey
-makepkg -si
+./build.sh --bump "local build" --install     # builds from HEAD, verifies, installs
 ```
 
+(Plain `./build.sh` leaves the package in `dist/` for `sudo pacman -U`.)
 `vibekeyd.service` ships **enabled-ready** but inactive; the udev rule and the
 `vibekey` group install with the package.
 

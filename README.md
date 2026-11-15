@@ -41,8 +41,8 @@ battery runs low ([docs/lighting.md](docs/lighting.md)).
 ## Install
 
 ```bash
-makepkg -si                       # from a checkout of this repo (MIT deps only)
-gpasswd -a $USER vibekey          # the one manual step — then reboot (see below)
+./build.sh --install          # builds from HEAD, verifies, sudo pacman -U
+gpasswd -a $USER vibekey      # the one manual step — then reboot (see below)
 systemctl --user enable --now vibekeyd
 ```
 
