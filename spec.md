@@ -492,8 +492,11 @@ from it, do not redesign:
   `QIcon` at the pixmap's native size and ignores `setIconSize` — render pixmaps
   at the exact intended px, no devicePixelRatio 2× tricks.
 - **Tray**: purple glossy circle with a white centered **U** (canonical renderer
-  `draw_app_icon()` on the prototype branch); menu = show/hide Panel, Quit. Tray
-  state conveys Daemon failure states (§5.3) and Knob mode.
+  `draw_app_icon()` on the prototype branch); menu = show/hide Panel, Quit.
+  Tray state conveys the **Knob mode** (dark bottom-left badge: ↕ Scroll,
+  terminal Sessions, speaker Volume, first letter of a custom mode) and Daemon
+  failure states (orange top-right **!**); both can show at once, tooltip names
+  the mode (spec §8/§5.3; verified legible at 22 px).
 - **handy card** (ticket 7): read-only card reading handy's store
   (`$XDG_DATA_HOME/com.pais.handy/settings_store.json`, with the config-dir
   path as fallback — **verified against the installed handy 0.10.0 on this box:

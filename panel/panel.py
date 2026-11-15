@@ -213,10 +213,76 @@ def draw_app_icon(pm):
     p.end()
 
 
-def app_icon_pixmap(size=32, warn=False):
+def _disc_badge(p, size, glyph):
+    """Dark corner disc (bottom-left) carrying the Knob-mode glyph; the
+    warning dot lives opposite (top-right) so the two never collide."""
+    d = size * 0.52
+    x, y = size * 0.02, size * 0.46
+    p.setPen(QPen(QColor("#ffffff"), max(1.0, size * 0.045)))
+    p.setBrush(QColor("#2c2e33"))
+    p.drawEllipse(QRectF(x, y, d, d))
+    glyph(p, QRectF(x, y, d, d))
+
+
+def _glyph_scroll(p, r):
+    cx, half = r.center().x(), r.width() * 0.16
+    p.setPen(_pen("#ffffff", max(1.0, r.width() * 0.11)))
+    y = r.top() + r.height() * 0.32
+    p.drawLine(QPointF(cx - half, y + half * 0.8), QPointF(cx, y))
+    p.drawLine(QPointF(cx, y), QPointF(cx + half, y + half * 0.8))
+    y2 = r.bottom() - r.height() * 0.32
+    p.drawLine(QPointF(cx - half, y2 - half * 0.8), QPointF(cx, y2))
+    p.drawLine(QPointF(cx, y2), QPointF(cx + half, y2 - half * 0.8))
+
+
+def _glyph_sessions(p, r):
+    p.setPen(_pen("#ffffff", max(1.0, r.width() * 0.09)))
+    p.setBrush(Qt.NoBrush)
+    rect = QRectF(r.left() + r.width() * 0.18, r.top() + r.height() * 0.22,
+                  r.width() * 0.64, r.height() * 0.56)
+    p.drawRoundedRect(rect, 1.5, 1.5)
+    y = rect.top() + rect.height() * 0.30
+    p.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
+
+
+def _glyph_volume(p, r):
+    cx, cy = r.center().x(), r.center().y()
+    k = r.width()
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor("#ffffff"))
+    path = QPainterPath(QPointF(cx - k * 0.16, cy - k * 0.07))
+    path.lineTo(cx - k * 0.04, cy - k * 0.07); path.lineTo(cx + k * 0.09, cy - k * 0.19)
+    path.lineTo(cx + k * 0.09, cy + k * 0.19); path.lineTo(cx - k * 0.04, cy + k * 0.07)
+    path.lineTo(cx - k * 0.16, cy + k * 0.07); path.closeSubpath()
+    p.drawPath(path)
+    p.setBrush(Qt.NoBrush)
+    p.setPen(_pen("#ffffff", max(1.0, k * 0.07)))
+    p.drawArc(QRectF(cx + k * 0.02, cy - k * 0.16, k * 0.26, k * 0.32), -60 * 16, 120 * 16)
+
+
+def _glyph_letter(letter):
+    def fn(p, r):
+        p.setPen(QColor("#ffffff"))
+        p.setFont(QFont("sans", int(r.width() * 0.52), QFont.Bold))
+        p.drawText(r, Qt.AlignCenter, letter.upper())
+    return fn
+
+
+MODE_GLYPHS = {"scroll": _glyph_scroll, "sessions": _glyph_sessions, "volume": _glyph_volume}
+
+
+def app_icon_pixmap(size=32, warn=False, mode_id=None, mode_label=None):
     pm = QPixmap(size, size)
     pm.fill(Qt.transparent)
     draw_app_icon(pm)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    glyph = MODE_GLYPHS.get(mode_id)
+    if glyph is None and mode_label:
+        glyph = _glyph_letter(mode_label.strip()[:1] or "?")
+    if glyph is not None:
+        _disc_badge(p, size, glyph)
+    p.end()
     if warn:  # tray state conveys Daemon failure states (spec §8)
         p = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing)
@@ -861,26 +927,28 @@ class TrayApp:
         tray.setToolTip("vibekey — AU05 control surface")
         tray.activated.connect(lambda reason: self.show_window() if reason == QSystemTrayIcon.Trigger else None)
         self.tray = tray
+        self.update_icon(self.window.state)   # tray starts already showing the current Knob mode
         tray.show()
 
-    def build_icon(self, warn):
-        theme = QIcon.fromTheme("vibekey")
-        if not theme.isNull():
-            return theme
-        return QIcon(app_icon_pixmap(32, warn=warn))
+    def build_icon(self, problem, mode_id=None, mode_label=None):
+        icon = QIcon()
+        for size in (22, 32):
+            icon.addPixmap(app_icon_pixmap(size, warn=problem, mode_id=mode_id, mode_label=mode_label))
+        return icon
 
     def update_icon(self, state):
         tray = getattr(self, "tray", None)   # may be called during construction
         if tray is None:
             return
         problem = bool(state.get("error")) or state.get("access") == "denied" or bool(state.get("last_error"))
-        tray.setIcon(self.build_icon(problem))
-        mode = (state.get("knob_mode") or {}).get("label")
+        mode = state.get("knob_mode") or {}
+        label = mode.get("label")
         tip = "vibekey — AU05 control surface"
-        if mode:
-            tip += " · Knob mode: %s" % mode
+        if label:
+            tip += " · Knob mode: %s" % label
         if problem:
             tip += " · see the Panel (attention badge)"
+        tray.setIcon(self.build_icon(problem, mode.get("id"), label))
         tray.setToolTip(tip)
 
     def toggle_window(self):
