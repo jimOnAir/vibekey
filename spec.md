@@ -111,8 +111,9 @@ Config dir `~/.config/vibekey/`, runtime dir `$XDG_RUNTIME_DIR/vibekey/`:
 | `config.json` | only via `vibekey-config` (atomic replace) | Daemon (0.5 s mtime poll + SIGHUP), Panel | schema §4 |
 | `seen.json` | Daemon (per press) | Panel | learned raw ids for Alias UX |
 | `actions.json` (catalogue) | package (`/usr/lib/vibekey/actions.json`) | Daemon (seed + behavior-presets), Panel (picker) | resolved relative to the package dir, **not** `bin/`-relative — a wrong path silently no-ops first-run seeding (risk R6) |
-| `state.json` | Daemon only, rewritten in place on every event | Panel (`QFileSystemWatcher` + 1 s/5 s poll) | fields: upstream set (`version,pid,connected,access,grabbed,mouse_passthrough,preview,knob_position,device,battery,last,events,error,updated`) **plus** `knob_mode` (§5.3) and `lighting` incl. `device_mode`: `0|1|2|"unknown"|"disabled"` (§5.5) |
+| `state.json` | Daemon only, rewritten in place on every event | Panel (`QFileSystemWatcher` + 1 s/5 s poll) | fields: upstream set (`version,pid,connected,access,grabbed,mouse_passthrough,preview,knob_position,device,battery,last,events,error,updated`) **plus** `knob_mode` (§5.3), `last_error` (§5.3 failure surface) and `lighting` incl. `device_mode`: `0|1|2|"unknown"|"disabled"`, `pending_mode`, `last_error` (§5.5) |
 | `preview` | Panel (`open` every 2 s while shown, `closed` on hide) | Daemon (trusts `open` for 6 s) | while active: events are reported, nothing runs |
+| `manage_lights` | Panel (one-shot `"manage"`) | Daemon (consumes + unlinks on its 0.5 s poll) | the consented Manage lights request (§5.5) — the Panel never touches the vendor channel |
 
 Preview semantics: with Preview on, the Daemon still publishes the event
 (`last` with the would-be action name) but suppresses the Assignment and the
@@ -138,7 +139,7 @@ vs *RAN (sim)* for its own simulated clicks (§8).
   "lighting": {
     "mode_ring": true, "fail_blink": true, "low_battery": true,
     "brightness": 1.0,
-    "patterns": { "Scroll": "off", "Sessions": "solid:8", "Volume": "breathe:8" }
+    "patterns": { "Scroll": "off", "Sessions": "heartbeat:8", "Volume": "breathe:8" }
   }
 }
 ```
@@ -166,11 +167,15 @@ vs *RAN (sim)* for its own simulated clicks (§8).
   **replaces upstream's per-config `knob_right`/`knob_left` entries**: turn events
   resolve against the catalogue entry of the *current* mode (which therefore
   stays available; the copied-fields trick no longer applies to knob turn).
-- **`lighting`** — exactly the block accepted in ticket 11 (repeated above).
-  `patterns` values are `effect[:brightness]` strings (`off` | `solid:<0-20>` |
-  `breathe:<0-20>`) addressed by Knob-mode **label**; a mode with no entry →
-  `off`. `brightness` is a multiplier (0.0–1.0) applied to every level the
-  lighting module writes (effective level = level × brightness).
+- **`lighting`** — exactly the block accepted in ticket 11, with the rhythm
+  extension (owner request, 2026-11-15). `patterns` values are strings
+  addressed by Knob-mode **label**; a mode with no entry → `off`. Grammar:
+  `off` | `solid:<0-20>` | `breathe:<0-20>` | `<rhythm>[:<level>[:<period_ms>]]`
+  where `<rhythm>` ∈ `pulse` · `heartbeat` · `tick` · `wave` · `gallop`
+  (host-driven sequences, §5.5; level default 8). Code defaults:
+  `Scroll:off`, `Sessions:heartbeat:8`, `Volume:breathe:8`.
+  `brightness` is a multiplier (0.0–1.0) applied to every level the lighting
+  module writes (effective level = level × brightness).
   Hot-reloaded by the existing 0.5 s config poll. The switches are feature
   toggles: `mode_ring` §5.3, `fail_blink` §5.4, `low_battery` §5.4.
 - **`grab`** / **`battery`** / **`aliases`**: upstream semantics, unchanged.
@@ -224,8 +229,8 @@ entirely** — documented known gap (ticket 6).
   fire): `keyboard_implementation = tauri` (the `handy_keys` backend reads
   `/dev/input` evdev, where XTEST events do not exist — hard trap),
   `shortcut_activation = push_to_talk` (ticket 7 prose calls it
-  "activation_mode"; the store key is `shortcut_activation` — verify against the
-  installed `settings_store.json`), `overlay_style = none`,
+  "activation_mode"; the store key is `shortcut_activation` — **verified**
+  against the installed store: nested under `settings`), `overlay_style = none`,
   `always_on_microphone = true`, `accelerator = cpu` unless a per-box GPU test
   wins. No fallback mode in v1 (no CLI/SIGUSR2 degraded path).
 - Published expectation, in docs and the Preset's tooltip: **~0.5–2 s
@@ -386,6 +391,14 @@ The Daemon is a **guest with one consented Manage lights**:
   The Panel brightness slider changes only the config `lighting.brightness`
   multiplier (§4) — it never touches the device's global brightness, so
   vibekeyd cannot dim a device the user set to Always On.
+- **Rhythm engine** (owner extension, 2026-11-15): patterns naming a built-in
+  rhythm (`pulse` · `heartbeat` · `tick` · `wave` · `gallop`; table
+  `RHYTHMS` in `vibekeyd`) run as queued cycles on the single writer — one SET
+  per step with `not_before` pacing; `pump()` re-queues the next cycle when
+  idle past `rhythm_tail`. Rhythm steps never dirty the owner records; a mode
+  switch, the `mode_ring` switch, or the low-battery latch purges queued
+  `rhythm` frames so cycles never interleave. Device-native `breathe` remains
+  available and is still the Volume default (zero host traffic for it).
 - **All three switches off → total silence**: no lighting GET, no `0x88`
   traffic from vibekeyd at all (the battery opcode on the same fd is
   unaffected), `device_mode: "disabled"`, no notify — cleanest form of "be
@@ -491,11 +504,17 @@ from it, do not redesign:
   `QIcon` at the pixmap's native size and ignores `setIconSize` — render pixmaps
   at the exact intended px, no devicePixelRatio 2× tricks.
 - **Tray**: purple glossy circle with a white centered **U** (canonical renderer
-  `draw_app_icon()` on the prototype branch); menu = show/hide Panel, Quit. Tray
-  state conveys Daemon failure states (§5.3) and Knob mode.
+  `draw_app_icon()` on the prototype branch); menu = show/hide Panel, Quit.
+  Tray state conveys the **Knob mode** (dark bottom-left badge: ↕ Scroll,
+  terminal Sessions, speaker Volume, first letter of a custom mode) and Daemon
+  failure states (orange top-right **!**); both can show at once, tooltip names
+  the mode (spec §8/§5.3; verified legible at 22 px).
 - **handy card** (ticket 7): read-only card reading handy's store
-  (`$XDG_CONFIG_HOME/com.pais.handy/settings_store.json` — Tauri store
-  `SETTINGS_STORE_PATH`, verify on the installed app before shipping) showing
+  (`$XDG_DATA_HOME/com.pais.handy/settings_store.json`, with the config-dir
+  path as fallback — **verified against the installed handy 0.10.0 on this box:
+  data dir, everything nested under a top-level `settings` key**; GPU lives in
+  `transcribe_accelerator`/`transcribe_gpu_device`, chord in
+  `bindings.transcribe.current_binding`) showing
   detected-vs-recommended: `keyboard_implementation=tauri` ✓/✗,
   `shortcut_activation=push_to_talk` ✓/✗ (against the exact config line),
   `always_on_microphone` ON, overlay OFF, model tiers + copy-paste snippet.

@@ -1,0 +1,224 @@
+{
+  "version": 1,
+  "defaults": {
+    "key1": "dictation_ptt",
+    "key2": "session_next",
+    "key3": "session_interrupt",
+    "knob_modes": ["scroll", "sessions", "volume"]
+  },
+  "presets": [
+    {
+      "id": "dictation_ptt",
+      "group": "Dictation",
+      "label": "Dictation (hold, handy)",
+      "description": "Hold to record, release to transcribe (handy). Expect ~0.5-2 s key-up to text.",
+      "behavior": "dictation.ptt",
+      "keys": "ctrl+alt+space"
+    },
+    {
+      "id": "session_next",
+      "group": "Agent",
+      "label": "Next Session",
+      "description": "Step the Ring forward and raise that Session's Host",
+      "behavior": "session.next"
+    },
+    {
+      "id": "session_prev",
+      "group": "Agent",
+      "label": "Previous Session",
+      "description": "Step the Ring back and raise that Session's Host",
+      "behavior": "session.prev"
+    },
+    {
+      "id": "session_focus",
+      "group": "Agent",
+      "label": "Focus this Session's terminal",
+      "description": "Raise the Cursor Session's Host without stepping the Ring",
+      "behavior": "session.focus"
+    },
+    {
+      "id": "session_interrupt",
+      "group": "Agent",
+      "label": "Interrupt",
+      "description": "API-first interrupt of the focused (else Cursor) Session - never Ctrl+C",
+      "behavior": "session.interrupt"
+    },
+    {
+      "id": "orca_worktree_next",
+      "group": "Agent",
+      "label": "Next Orca worktree",
+      "description": "Activate the next worktree in the Daemon-owned cycle and raise the Orca window",
+      "behavior": "orca.worktree.next"
+    },
+    {
+      "id": "orca_worktree_prev",
+      "group": "Agent",
+      "label": "Previous Orca worktree",
+      "description": "Same cycle, backwards",
+      "behavior": "orca.worktree.prev"
+    },
+    {
+      "id": "key_enter",
+      "group": "Keys",
+      "label": "Press Enter",
+      "description": "Confirm, like the factory setting",
+      "keys": "Return"
+    },
+    {
+      "id": "key_escape",
+      "group": "Keys",
+      "label": "Press Escape",
+      "description": "Cancel",
+      "keys": "Escape"
+    },
+    {
+      "id": "key_tab",
+      "group": "Keys",
+      "label": "Press Tab",
+      "description": "Keys: Tab",
+      "keys": "Tab"
+    },
+    {
+      "id": "key_shift_tab",
+      "group": "Keys",
+      "label": "Press Shift+Tab",
+      "description": "Keys: shift+Tab",
+      "keys": "shift+Tab"
+    },
+    {
+      "id": "key_up",
+      "group": "Keys",
+      "label": "Press Up",
+      "description": "Keys: Up",
+      "keys": "Up"
+    },
+    {
+      "id": "key_down",
+      "group": "Keys",
+      "label": "Press Down",
+      "description": "Keys: Down",
+      "keys": "Down"
+    },
+    {
+      "id": "key_left",
+      "group": "Keys",
+      "label": "Press Left",
+      "description": "Keys: Left",
+      "keys": "Left"
+    },
+    {
+      "id": "key_right",
+      "group": "Keys",
+      "label": "Press Right",
+      "description": "Keys: Right",
+      "keys": "Right"
+    },
+    {
+      "id": "key_ctrl_enter",
+      "group": "Keys",
+      "label": "Press Ctrl+Enter",
+      "description": "Keys: ctrl+Return",
+      "keys": "ctrl+Return"
+    },
+    {
+      "id": "media_play",
+      "group": "Media",
+      "label": "Play or pause",
+      "description": "Keys: XF86AudioPlay",
+      "keys": "XF86AudioPlay"
+    },
+    {
+      "id": "media_next",
+      "group": "Media",
+      "label": "Next track",
+      "description": "Keys: XF86AudioNext",
+      "keys": "XF86AudioNext"
+    },
+    {
+      "id": "media_prev",
+      "group": "Media",
+      "label": "Previous track",
+      "description": "Keys: XF86AudioPrev",
+      "keys": "XF86AudioPrev"
+    },
+    {
+      "id": "media_lower",
+      "group": "Media",
+      "label": "Volume down",
+      "description": "Keys: XF86AudioLowerVolume",
+      "keys": "XF86AudioLowerVolume"
+    },
+    {
+      "id": "media_raise",
+      "group": "Media",
+      "label": "Volume up",
+      "description": "Keys: XF86AudioRaiseVolume",
+      "keys": "XF86AudioRaiseVolume"
+    },
+    {
+      "id": "media_mute",
+      "group": "Media",
+      "label": "Mute",
+      "description": "Keys: XF86AudioMute",
+      "keys": "XF86AudioMute"
+    },
+    {
+      "id": "sys_screenshot",
+      "group": "System",
+      "label": "Screenshot (Spectacle)",
+      "description": "spectacle -rb (flags verified at install time, spec item 13)",
+      "command": "spectacle -rb"
+    },
+    {
+      "id": "sys_lock",
+      "group": "System",
+      "label": "Lock screen",
+      "description": "loginctl lock-session",
+      "command": "loginctl lock-session"
+    },
+    {
+      "id": "sys_terminal",
+      "group": "System",
+      "label": "New Konsole",
+      "description": "konsole",
+      "command": "konsole"
+    },
+    {
+      "id": "sys_bright_up",
+      "group": "System",
+      "label": "Brightness +5 %",
+      "description": "brightnessctl set 5%+",
+      "command": "brightnessctl set 5%+"
+    },
+    {
+      "id": "sys_bright_down",
+      "group": "System",
+      "label": "Brightness -5 %",
+      "description": "brightnessctl set 5%-",
+      "command": "brightnessctl set 5%-"
+    }
+  ],
+  "knob_turn": [
+    {
+      "id": "scroll",
+      "label": "Scroll",
+      "description": "Right scrolls down, left scrolls up, like a mouse wheel",
+      "right": {"scroll": "down"},
+      "left": {"scroll": "up"}
+    },
+    {
+      "id": "sessions",
+      "label": "Sessions",
+      "description": "Step the Session Ring and raise each Host",
+      "right": {"behavior": "sessions.turn", "dir": "+1"},
+      "left": {"behavior": "sessions.turn", "dir": "-1"}
+    },
+    {
+      "id": "volume",
+      "label": "Volume",
+      "description": "Right louder, left quieter",
+      "right": {"command": "pactl set-sink-volume @DEFAULT_SINK@ +5%"},
+      "left": {"command": "pactl set-sink-volume @DEFAULT_SINK@ -5%"}
+    }
+  ]
+}

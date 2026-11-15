@@ -1,0 +1,12 @@
+[Unit]
+Description=vibekey AU05 daemon
+# xdotool needs DISPLAY/XAUTHORITY from the graphical session (port-audit R3);
+# spawn() swallows failures silently, so order the unit after the session.
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/lib/vibekey/bin/vibekeyd
+Restart=always
+
+[Install]
+WantedBy=default.target
