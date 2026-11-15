@@ -33,6 +33,13 @@ A learned factory report that counts as one of the six Controls, for units
 reprogrammed in Ulanzi Studio.
 _Avoid_: remap, override
 
+**Device lighting mode**:
+The AU05's global lighting setting — Always Off / Always On / Working
+(Studio's labels; Working = factory) — that gates whether per-channel lighting
+writes are visible on the device. The Daemon changes it only through Manage
+lights.
+_Avoid_: lighting mode, device mode, work mode, takeover
+
 ### Assignments
 
 **Assignment**:
@@ -81,3 +88,8 @@ _Avoid_: pointer, index
 **Knob mode**:
 The active Preset for knob-turn; cycled by knob press.
 _Avoid_: knob setting, dial mode
+
+**Manage lights**:
+The consented Panel action that sets the Device lighting mode to Working and
+hands the Daemon the per-channel lighting fields.
+_Avoid_: takeover, own lights, fix lighting, enable lighting

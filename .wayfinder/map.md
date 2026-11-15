@@ -42,6 +42,8 @@ sessions; nothing on this map builds it.
 
 <!-- one line per closed ticket: name + gist + link -->
 
+- [Lighting device-mode ownership](tickets/0012-lighting-device-mode-ownership.md): **guest with one consented Manage lights** (read mode at connect; mode ≠ Working → lighting idle + Panel line + ack-confirmed mode-2 button, boot-once notify, no consent memory, revert stays in Studio); strict mask split — vibekeyd owns per-light fields, mode only via consent, global brightness `0x02` never; unknown mode optimistic + lazy re-GET; all-switches-off = total `0x88` silence. **Closes the last open question — spec.md complete, map at destination.**
+
 - [Assemble the buildable spec](tickets/0009-assemble-buildable-spec.md): **`spec.md` at the repo root — the destination** — architecture, file protocol, config schema (+`behavior` presets), full preset table and `defaults`, Variant-A Panel surface, packaging/install/uninstall, and a 16-item implementation verification checklist. Complete except one flagged subsection (§5.5 device lighting-mode ownership) carried to new ticket [0012](tickets/0012-lighting-device-mode-ownership.md).
 
 - [Lighting design: ring, blink, battery](tickets/0011-lighting-design.md): Ring = Knob-mode indicator (`Scroll:off`, `Sessions:solid:8`, `Volume:breathe:8`, custom→off); failure = 3 fast blinks **on the culprit's keycap** (fire-time only — the standby gotcha can't bite); ≤10% battery → ring `breathe:6` + one notify, hysteresis at 20%; Panel = 3 switches + brightness slider only; `"lighting"` config block accepted; single-writer module confirmed as architecture.
@@ -57,10 +59,6 @@ sessions; nothing on this map builds it.
 
 ## Not yet specified
 
-- **Lighting device-mode ownership** — open ticket
-  [0012](tickets/0012-lighting-device-mode-ownership.md) (grilling): who owns
-  the device-global lighting mode (off/all-on/work) and what vibekeyd does when
-  it doesn't hold it; the only `spec.md` subsection not yet buildable (§5.5).
 - **Firmware-variant confirmation on this actual Dongle** — the port audit
   verified this Dongle's node topology (`hidraw12` + vendor channel + 3 event
   nodes) matches the daemon's assumptions; still open: which knob-turn/press

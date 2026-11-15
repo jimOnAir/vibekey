@@ -5,11 +5,11 @@ USB keypad into a programmable control surface on a Manjaro Linux / KDE Plasma /
 X11 desktop, porting the excellent
 [jimmibram/vibekey-driver](https://github.com/jimmibram/vibekey-driver) (Omarchy).
 
-**Status: planning done — [spec.md](spec.md) is the buildable spec** (wayfinder
-ticket 9, the map's destination). The map and its decision tickets stay as the
-provenance record; one lighting sub-question remains open in
-[ticket 0012](.wayfinder/tickets/0012-lighting-device-mode-ownership.md).
-No implementation code yet — implementation sessions work from `spec.md`.
+**Status: planning complete — [spec.md](spec.md) is the buildable spec**
+(wayfinder ticket 9, the map's destination; ticket 12 closed the last open
+decision — zero decisions remain open). The map and its decision tickets stay
+as the provenance record. No implementation code yet — implementation sessions
+work from `spec.md`.
 
 ## Layout
 

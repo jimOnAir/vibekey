@@ -1,10 +1,10 @@
 # vibekey — buildable spec (port of jimmibram/vibekey-driver to Manjaro KDE / X11)
 
-Status: **complete except §5.5**, which is pending ticket
-[0012](.wayfinder/tickets/0012-lighting-device-mode-ownership.md). Everything else
-here is settled decision, consolidated from the wayfinder map
-([.wayfinder/map.md](.wayfinder/map.md)) and its closed tickets. Implementation
-sessions work from this document alone; nothing here needs re-deciding.
+Status: **complete — all twelve tickets closed.** Everything here is settled
+decision, consolidated from the wayfinder map
+([.wayfinder/map.md](.wayfinder/map.md)) and its tickets; ticket 12 was the
+last open question. Implementation sessions work from this document alone;
+nothing here needs re-deciding.
 
 Vocabulary follows [`GLOSSARY.md`](GLOSSARY.md) and is binding: Control, Dongle,
 Grab, Preview, Alias, Assignment, Preset, Dictation, Daemon, Panel, Session, Host,
@@ -111,7 +111,7 @@ Config dir `~/.config/vibekey/`, runtime dir `$XDG_RUNTIME_DIR/vibekey/`:
 | `config.json` | only via `vibekey-config` (atomic replace) | Daemon (0.5 s mtime poll + SIGHUP), Panel | schema §4 |
 | `seen.json` | Daemon (per press) | Panel | learned raw ids for Alias UX |
 | `actions.json` (catalogue) | package (`/usr/lib/vibekey/actions.json`) | Daemon (seed + behavior-presets), Panel (picker) | resolved relative to the package dir, **not** `bin/`-relative — a wrong path silently no-ops first-run seeding (risk R6) |
-| `state.json` | Daemon only, rewritten in place on every event | Panel (`QFileSystemWatcher` + 1 s/5 s poll) | fields: upstream set (`version,pid,connected,access,grabbed,mouse_passthrough,preview,knob_position,device,battery,last,events,error,updated`) **plus** `knob_mode` (§5.3) and `lighting` (§5.5) |
+| `state.json` | Daemon only, rewritten in place on every event | Panel (`QFileSystemWatcher` + 1 s/5 s poll) | fields: upstream set (`version,pid,connected,access,grabbed,mouse_passthrough,preview,knob_position,device,battery,last,events,error,updated`) **plus** `knob_mode` (§5.3) and `lighting` incl. `device_mode`: `0|1|2|"unknown"|"disabled"` (§5.5) |
 | `preview` | Panel (`open` every 2 s while shown, `closed` on hide) | Daemon (trusts `open` for 6 s) | while active: events are reported, nothing runs |
 
 Preview semantics: with Preview on, the Daemon still publishes the event
@@ -307,7 +307,7 @@ knob ring `breathe:6` while it lasts + exactly **one** `notify-send` per crossin
 hysteresis resets the latch at `> 20` %. The feature (ring indication and the
 notification together) is gated by the `low_battery` switch.
 
-### 5.5 Lighting module — protocol, architecture, and the one open item
+### 5.5 Lighting module — protocol and architecture
 
 Ground facts ([evidence](https://github.com/jimOnAir/vibekey/blob/research/backlight-control/research/backlight-control.md),
 verified by two independent projects on real AU05 hardware; the TEA key already
@@ -343,13 +343,54 @@ sits in the upstream code at `bin/vibekeyd:139`):
   on top. Startup: GET the device lighting config, keep the four records in
   memory, expose `lighting` in `state.json` (channels, acked state, errors) for
   the Panel.
-- **Open — pending ticket 0012**: device global *mode* ownership (all-off /
-  all-on / work). Per-light fields are only visible when the device sits in mode
-  2 (work/active); the Daemon must never silently flip a user's mode configured
-  elsewhere (Ulanzi Studio), but which behaviour owns what, how a mode-0/1
-  device surfaces, and whether the Panel gets a management switch is **not yet
-  decided — do not implement this subsection until ticket 0012 closes.** All
-  other module behaviour above is settled and implementable.
+
+#### Device lighting mode policy (ticket 12)
+
+The **Device lighting mode** (GLOSSARY — Always Off / Always On / Working;
+values `0`/`1`/`2`) gates whether per-light writes are visible on the device.
+The Daemon is a **guest with one consented Manage lights**:
+
+- Read the mode by GET at every connect; publish it in `state.json`
+  `lighting.device_mode` (§3).
+- Mode `0`/`1` → **all lighting policies idle** (ring pattern, failure blink,
+  battery breathe write nothing). The Panel Lighting section shows the line
+  `Device lighting mode: Always Off — vibekeyd's lighting is idle.` (or
+  *Always On*) with a contextual **Manage lights** button; one `notify-send`
+  per **Daemon start** — never per Dongle re-enumeration — only when the mode
+  is known ≠ 2 **and** at least one lighting switch is on:
+  `vibekey: AU05 device lighting is "Always Off" — knob ring and keycap blinks are idle. Open the Panel → Lighting to let vibekeyd manage lights.`
+- **Manage lights** click → SET mask `0x01` = `2` (ack-confirmed as above),
+  then immediately apply the current Knob mode's pattern. No ack (keypad
+  asleep) → status line `No answer from the device — press any key on the
+  AU05, then try again.`; the button stays, no auto-retry — a key press *is*
+  the wake mechanism (same physics as fire-time-only blinks).
+- **No consent memory**: every connect re-reads; if the user later sets mode
+  0/1 in Studio, the line + button return (boot notify per its once-rule).
+  Reverting is always the user's side, in Studio — vibekeyd never writes the
+  mode back and offers no "give back" (it cannot know which mode they'd want).
+- Mode **unknown** (GET unanswered — keypad asleep) → **optimistic**: treat as
+  Working, features stay live; writes issued into sleep drop silently (the
+  accepted gotcha), and blinks are fire-time (awake). `state.json` shows
+  `"unknown"`, the Panel shows no line/button, and the Daemon re-GETs lazily
+  at the first Control event after a boot/reconnect that left the mode
+  unknown, and on config hot-reload that enables a feature.
+- **Mask ownership** (binding):
+
+  | mask | field | owner |
+  |---|---|---|
+  | `0x04` | per-light effect type | vibekeyd (read-modify-write) |
+  | `0x20` / `0x40` | per-light breathing / always-on brightness | vibekeyd (read-modify-write) |
+  | `0x01` | Device lighting mode | vibekeyd **only** via a consented Manage lights click |
+  | `0x02` | device global brightness (all-on level) | user/Studio — **never** written by vibekeyd |
+
+  The Panel brightness slider changes only the config `lighting.brightness`
+  multiplier (§4) — it never touches the device's global brightness, so
+  vibekeyd cannot dim a device the user set to Always On.
+- **All three switches off → total silence**: no lighting GET, no `0x88`
+  traffic from vibekeyd at all (the battery opcode on the same fd is
+  unaffected), `device_mode: "disabled"`, no notify — cleanest form of "be
+  the only config host" for users who deliberately killed all lighting.
+  Hot-reload turning any switch on triggers a GET immediately.
 
 ## 6. xdotool specifics for the Panel (editors)
 
@@ -463,7 +504,9 @@ from it, do not redesign:
   on click (never silent overwrite; the rest stays read-only guidance).
 - **Lighting section**: three switches (`mode_ring` / `fail_blink` /
   `low_battery`) + one global brightness slider → `vibekey-config set lighting
-  <json>`; no pattern editors (patterns live in config.json).
+  <json>`; no pattern editors (patterns live in config.json). While the Device
+  lighting mode ≠ Working: one status line + contextual **Manage lights**
+  button (ticket 12, §5.5 — the three-switch scope holds for the normal case).
 - **Launch at login** checkbox → writes/removes
   `~/.config/autostart/vibekey-panel.desktop` (standard XDG autostart; reversible
   from KDE's own UI).
@@ -597,8 +640,13 @@ one observable outcome):
 12. **Lighting policies**: knob press → ring pattern per config (chip + notify +
     ring agree); trigger a failure (handy not running / service down) →
     culprit keycap blinks 3×, ring stays; battery ≤10 % → ring `breathe:6` +
-    one notify; >20 % → latch reset. (Device-mode behaviour per §5.5 after
-    ticket 0012.)
+    one notify; >20 % → latch reset. **Device-mode bench** (§5.5): set Device
+    lighting mode `0` via the vendor-channel test tool → lighting idles, one
+    boot notify, Panel line + **Manage lights** appears; click → mode acked
+    `2`, patterns resume; repeat the click with the keypad asleep → the
+    no-ack line shows and mode is unchanged on the next try; all three
+    switches off → `0x88` traffic vanishes entirely (`tcpdump`/`usbmon` or
+    Daemon log = zero GETs).
 13. **Command Presets**: each `command` preset does its thing with the Panel
     closed — volume turn moves `pactl` sink volume, brightness turn moves
     `brightnessctl`, `sys_lock` locks, `sys_screenshot` captures
@@ -617,7 +665,6 @@ one observable outcome):
 
 ## 11. Accepted open items (do not block; do not re-decide here)
 
-- **Ticket 0012** (open): lighting device-mode ownership → §5.5.
 - **Firmware-variant confirmation + physical icon↔Control mapping** on this
   unit — probe at implementation (checklist 5).
 - **Lighting bench probes** (checklist 11) close the three residual unknowns
