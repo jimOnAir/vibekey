@@ -278,12 +278,12 @@ class KeypadWidget(QFrame):
             p.drawRoundedRect(cx - 28, 75 - 28, 56, 56, 12, 12)
             p.setPen(Qt.NoPen); p.setBrush(QColor("#fafafa"))
             p.drawEllipse(cx - 22, 75 - 22, 44, 44)
-        # long end-bar with line-art ⊗
+        # long end-bar with the same arc-wrapped cross motif
         p.setPen(QColor("#b6b8bc")); p.setBrush(QColor("#eceef0"))
         p.drawRoundedRect(340, 47, 112, 56, 14, 14)
         p.save()
         p.translate(396 - 22, 75 - 22)
-        draw_cross_circle(p, 44, "#7c7f85")
+        draw_cross(p, 44, "#7c7f85")
         p.restore()
         # mic slots + logo near the knob end
         p.setPen(Qt.NoPen); p.setBrush(QColor("#9c9ea3"))
@@ -549,30 +549,48 @@ def _pen(color, w):
     return QPen(QColor(color), w, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
 
 
+def _arcs(p, s, color, r=10.4):
+    """the AU05 cap motif: two open arcs (split circle, gaps top/bottom)."""
+    import math
+    k = s / 28.0
+    p.setPen(_pen(color, 2.2 * k))
+    p.setBrush(Qt.NoBrush)
+    cx = cy = 14 * k
+    rr = r * k
+    for a0, a1 in ((112.0, 248.0), (68.0, -68.0)):
+        prev = None
+        steps = 14
+        for i in range(steps + 1):
+            a = math.radians(a0 + (a1 - a0) * i / steps)
+            pt = QPointF(cx + rr * math.cos(a), cy - rr * math.sin(a))
+            if prev is not None:
+                p.drawLine(prev, pt)
+            prev = pt
+
+
 def draw_mic(p, s, color):
     k = s / 28.0
-    p.setPen(_pen(color, 2.2 * k)); p.setBrush(Qt.NoBrush)
-    p.drawRoundedRect(11 * k, 4 * k, 6 * k, 12 * k, 3 * k, 3 * k)
-    path = QPainterPath(); path.moveTo(8.5 * k, 13 * k)
-    path.cubicTo(8.5 * k, 21 * k, 19.5 * k, 21 * k, 19.5 * k, 13 * k)
-    p.drawPath(path)
-    p.drawLine(QPointF(14 * k, 19.5 * k), QPointF(14 * k, 24 * k))
-    p.drawLine(QPointF(9.5 * k, 24 * k), QPointF(18.5 * k, 24 * k))
+    _arcs(p, s, color)
+    p.setPen(_pen(color, 1.9 * k)); p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(12.2 * k, 9.6 * k, 3.6 * k, 8.4 * k, 1.8 * k, 1.8 * k)
+    p.drawLine(QPointF(12.3 * k, 20.2 * k), QPointF(15.7 * k, 20.2 * k))
 
 
 def draw_check(p, s, color):
     k = s / 28.0
-    p.setPen(_pen(color, 2.8 * k)); p.setBrush(Qt.NoBrush)
-    path = QPainterPath(QPointF(7.5 * k, 15 * k))
-    path.lineTo(12.5 * k, 20 * k); path.lineTo(20.5 * k, 8.5 * k)
+    _arcs(p, s, color)
+    p.setPen(_pen(color, 2.4 * k)); p.setBrush(Qt.NoBrush)
+    path = QPainterPath(QPointF(11.3 * k, 14.4 * k))
+    path.lineTo(13.2 * k, 16.4 * k); path.lineTo(16.9 * k, 11.9 * k)
     p.drawPath(path)
 
 
 def draw_cross(p, s, color):
     k = s / 28.0
-    p.setPen(_pen(color, 2.8 * k))
-    p.drawLine(QPointF(9 * k, 9 * k), QPointF(19 * k, 19 * k))
-    p.drawLine(QPointF(19 * k, 9 * k), QPointF(9 * k, 19 * k))
+    _arcs(p, s, color)
+    p.setPen(_pen(color, 2.2 * k))
+    p.drawLine(QPointF(12.1 * k, 12.1 * k), QPointF(15.9 * k, 15.9 * k))
+    p.drawLine(QPointF(15.9 * k, 12.1 * k), QPointF(12.1 * k, 15.9 * k))
 
 
 def draw_cross_circle(p, s, color):
