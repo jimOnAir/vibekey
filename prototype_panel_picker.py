@@ -228,10 +228,10 @@ class KeypadWidget(QFrame):
         super().__init__()
         self.setFixedSize(self.W, self.H)
         spec = [  # (key, line-icon fn, cx, cy, r) — zones over the drawn art
-            ("knob_press", None, 74, 75, 36),
-            ("voice", draw_mic, 168, 75, 24),
-            ("confirm", draw_check, 233, 75, 24),
-            ("cancel", draw_cross, 298, 75, 24),
+            ("knob_press", None, 170, 75, 36),
+            ("voice", draw_mic, 260, 75, 24),
+            ("confirm", draw_check, 320, 75, 24),
+            ("cancel", draw_cross, 380, 75, 24),
         ]
         for key, fn, cx, cy, r in spec:
             b = SimButton(model, key, "", edit_cb, self)
@@ -254,7 +254,7 @@ class KeypadWidget(QFrame):
                             "QPushButton:pressed{background:rgba(61,132,246,70);border-radius:10px}")
             b.setIcon(line_icon(draw_turn(dx > 0), 22))
             b.setIconSize(QSize(22, 22))
-            b.setGeometry(74 + dx * 54 - 13, 75 - 50, 26, 26)
+            b.setGeometry(170 + dx * 54 - 13, 75 - 50, 26, 26)
             b.setToolTip("knob turn " + ("◀" if dx < 0 else "▶"))
 
     def paintEvent(self, e):
@@ -266,31 +266,30 @@ class KeypadWidget(QFrame):
         g.setColorAt(0, QColor("#e9eaec")); g.setColorAt(0.5, QColor("#d8dadc")); g.setColorAt(1, QColor("#c6c8cc"))
         p.setPen(QColor("#b3b5b9")); p.setBrush(g)
         p.drawRoundedRect(6, 6, self.W - 12, self.H - 12, 24, 24)
-        # speaker mesh band at the far (left) end
+        # far-end column: speaker mesh, Ulanzi logo, mic slots — no overlap
         p.setPen(Qt.NoPen); p.setBrush(QColor("#8f9297"))
         for col in range(3):
             for row in range(9):
                 p.drawEllipse(12 + col * 4.5, 22 + row * 12, 2.4, 2.4)
         p.setPen(QColor("#7c7f85")); p.setFont(QFont("sans", 7))
-        p.drawText(34, 20, 60, 12, Qt.AlignLeft | Qt.AlignVCenter, "Ulanzi")
-        # mic slots between logo and knob
+        p.drawText(26, 55, 40, 40, Qt.AlignCenter, "Ulanzi")
         p.setPen(Qt.NoPen); p.setBrush(QColor("#9c9ea3"))
         for i in range(5):
-            p.drawRoundedRect(62 + i * 7, 22, 3, 12, 1.5, 1.5)
-        # knob: recess groove + aluminium dome + dark grip ticks
+            p.drawRoundedRect(72 + i * 7, 66, 3, 18, 1.5, 1.5)
+        # knob: recess groove + aluminium dome + grip marks every 90°
         p.setPen(QPen(QColor("#a4a6aa"), 2)); p.setBrush(QColor("#caced3"))
-        p.drawEllipse(74 - 46, 75 - 46, 92, 92)
-        kg = QRadialGradient(62, 62, 66, 62, 62)
+        p.drawEllipse(170 - 46, 75 - 46, 92, 92)
+        kg = QRadialGradient(158, 63, 66, 158, 63)
         kg.setColorAt(0, QColor("#ffffff")); kg.setColorAt(0.6, QColor("#e2e4e7")); kg.setColorAt(1, QColor("#c3c6ca"))
         p.setPen(QColor("#aeb0b4")); p.setBrush(kg)
-        p.drawEllipse(74 - 40, 75 - 40, 80, 80)
+        p.drawEllipse(170 - 40, 75 - 40, 80, 80)
         p.setPen(QPen(QColor("#8f9297"), 1.8))
-        for ang in (0, 90, 180, 270):  # grip marks every 90°, per the real knob
-            x1, y1 = 74 + 32 * math.cos(math.radians(ang)), 75 - 32 * math.sin(math.radians(ang))
-            x2, y2 = 74 + 38 * math.cos(math.radians(ang)), 75 - 38 * math.sin(math.radians(ang))
+        for ang in (0, 90, 180, 270):  # grip marks per the real knob
+            x1, y1 = 170 + 32 * math.cos(math.radians(ang)), 75 - 32 * math.sin(math.radians(ang))
+            x2, y2 = 170 + 38 * math.cos(math.radians(ang)), 75 - 38 * math.sin(math.radians(ang))
             p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
         # three square white keycaps in square housings
-        for cx in (168, 233, 298):
+        for cx in (260, 320, 380):
             p.setPen(QColor("#c3c5c9")); p.setBrush(QColor("#d6d8db"))
             p.drawRoundedRect(cx - 28, 75 - 28, 56, 56, 12, 12)
             p.setPen(QColor("#c0c2c6")); p.setBrush(QColor("#fafafa"))
@@ -576,15 +575,15 @@ def _arcs(p, s, color, r=10.4, rot=0.0):
 
 
 def draw_mic(p, s, color):
-    """mic cap: plain mic glyph, no arcs — cup hugging the capsule."""
+    """mic cap: plain mic glyph, no arcs — tall capsule, deep narrow yoke."""
     k = s / 28.0
-    p.setPen(_pen(color, 2.2 * k)); p.setBrush(Qt.NoBrush)
-    p.drawRoundedRect(11.2 * k, 4.5 * k, 5.6 * k, 10.5 * k, 2.8 * k, 2.8 * k)
-    path = QPainterPath(); path.moveTo(8.8 * k, 11.8 * k)
-    path.cubicTo(8.8 * k, 17.5 * k, 19.2 * k, 17.5 * k, 19.2 * k, 11.8 * k)
+    p.setPen(_pen(color, 2.1 * k)); p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(11.3 * k, 3.6 * k, 5.4 * k, 10.8 * k, 2.7 * k, 2.7 * k)
+    path = QPainterPath(); path.moveTo(9.2 * k, 10.4 * k)
+    path.cubicTo(9.2 * k, 18.4 * k, 18.8 * k, 18.4 * k, 18.8 * k, 10.4 * k)
     p.drawPath(path)
-    p.drawLine(QPointF(14 * k, 16.2 * k), QPointF(14 * k, 20.5 * k))
-    p.drawLine(QPointF(11.0 * k, 20.5 * k), QPointF(17.0 * k, 20.5 * k))
+    p.drawLine(QPointF(14 * k, 16.9 * k), QPointF(14 * k, 20.8 * k))
+    p.drawLine(QPointF(10.8 * k, 20.8 * k), QPointF(17.2 * k, 20.8 * k))
 
 
 def draw_check(p, s, color):
