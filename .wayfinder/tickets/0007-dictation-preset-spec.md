@@ -2,7 +2,7 @@
 title: "Dictation preset spec"
 type: wayfinder:grilling
 status: open
-assignee:
+assignee: jimOnAir
 blocked-by:
   - 0002-handy-x11-arch.md
 ---

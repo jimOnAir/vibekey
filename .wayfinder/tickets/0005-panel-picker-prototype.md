@@ -53,7 +53,10 @@ window+tray, picker grouping, how "preview" is communicated.
   graphite strokes, rounded caps/join, invert to white on press. Renderers
   `draw_mic/draw_check/draw_cross/draw_turn` + `_arcs(rot=)` + `line_icon()`
   in `prototype_panel_picker.py` (verified via offscreen grabs,
-  `preview_keypad.py`).
+  `preview_keypad.py`). **Gotcha for the implementation:** a stylesheet'd
+  `QPushButton` draws its `QIcon` at the pixmap's native size and *ignores*
+  `setIconSize` — render icon pixmaps at the exact intended px (no 2×
+  devicePixelRatio tricks), or the glyphs clip huge (seen live).
 - **Tray icon + menu** for re-showing the Panel; *Preview* is a
   checkbox in the Panel, default on. Final icon: **glossy purple circle with
   a white centered `U`** (radial gradient, upper sheen, darker rim) — legible
