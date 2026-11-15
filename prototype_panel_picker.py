@@ -509,6 +509,29 @@ class VariantC(BaseWindow):
 PROBE_LOG = "/tmp/opencode/au05-probe.log"
 
 
+def draw_app_icon(pm):
+    """The chosen icon: glossy purple circle with a white centered 'U'."""
+    from PySide6.QtGui import QPen, QRadialGradient
+    s = pm.width()
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    g = QRadialGradient(s * 0.36, s * 0.30, s * 0.95, s * 0.36, s * 0.30)
+    g.setColorAt(0.0, QColor("#9d7bf7"))
+    g.setColorAt(0.55, QColor("#7c3aed"))
+    g.setColorAt(1.0, QColor("#5f27c9"))
+    p.setPen(QPen(QColor("#4c1ea6"), max(1.0, s * 0.04)))
+    p.setBrush(g)
+    p.drawEllipse(s * 0.055, s * 0.055, s * 0.89, s * 0.89)
+    # gloss sheen on the upper third
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(255, 255, 255, 66))
+    p.drawEllipse(QRectF(s * 0.17, s * 0.11, s * 0.66, s * 0.34))
+    p.setPen(QColor("white"))
+    p.setFont(QFont("sans", int(s * 0.44), QFont.Bold))
+    p.drawText(QRectF(0, -s * 0.03, s, s), Qt.AlignCenter, "U")
+    p.end()
+
+
 class ProbeWindow(QMainWindow):
     """Focus me + press the REAL keypad: logs every X key event, press and
     release, with timestamps → /tmp/opencode/au05-probe.log."""
@@ -607,20 +630,9 @@ class App:
         self.probe.activateWindow()
 
     def make_tray(self):
-        from PySide6.QtGui import QPolygonF
         pm = QPixmap(32, 32)
         pm.fill(Qt.transparent)
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.Antialiasing)
-        # purple drop with a "u" (Ulanzi), point down: circle + downward triangle
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#7c3aed"))
-        p.drawPolygon(QPolygonF([QPointF(16, 30), QPointF(6.5, 12.5), QPointF(25.5, 12.5)]))
-        p.drawEllipse(5, 1, 22, 22)
-        p.setPen(QColor("white"))
-        p.setFont(QFont("sans", 12, QFont.Bold))
-        p.drawText(QRectF(5, -1, 22, 24), Qt.AlignCenter, "u")
-        p.end()
+        draw_app_icon(pm)
         icon = QIcon(pm)
         self.app.setWindowIcon(icon)
         tray = QSystemTrayIcon(icon, self.app)

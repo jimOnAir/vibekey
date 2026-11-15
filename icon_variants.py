@@ -196,7 +196,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     app = QApplication([])
     cell = 128
-    sheet = QPixmap(cell * len(sel), int(cell * 1.35))
+    sheet = QPixmap(cell * len(sel), int(cell * 1.75))
     sheet.fill(QColor("#eceef0"))
     p = QPainter(sheet)
     p.setRenderHint(QPainter.Antialiasing)
