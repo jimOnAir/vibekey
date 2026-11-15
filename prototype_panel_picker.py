@@ -575,15 +575,15 @@ def _arcs(p, s, color, r=10.4, rot=0.0):
 
 
 def draw_mic(p, s, color):
-    """mic cap: exactly the AU05 engraving — capsule, shallow U yoke, short
-    tail; NO base line."""
+    """mic cap: AU05 engraving — slim capsule, shallow smile-yoke low on the
+    capsule, short tail, light stroke; no foot."""
     k = s / 28.0
-    p.setPen(_pen(color, 2.1 * k)); p.setBrush(Qt.NoBrush)
-    p.drawRoundedRect(11.3 * k, 4.6 * k, 5.4 * k, 9.8 * k, 2.7 * k, 2.7 * k)
-    path = QPainterPath(); path.moveTo(9.6 * k, 10.6 * k)
-    path.cubicTo(9.6 * k, 18.6 * k, 18.4 * k, 18.6 * k, 18.4 * k, 10.6 * k)
+    p.setPen(_pen(color, 1.4 * k)); p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(12.1 * k, 6.6 * k, 3.8 * k, 8.8 * k, 1.9 * k, 1.9 * k)
+    path = QPainterPath(); path.moveTo(10.4 * k, 13.8 * k)
+    path.cubicTo(10.4 * k, 18.8 * k, 17.6 * k, 18.8 * k, 17.6 * k, 13.8 * k)
     p.drawPath(path)
-    p.drawLine(QPointF(14 * k, 16.8 * k), QPointF(14 * k, 20.4 * k))
+    p.drawLine(QPointF(14 * k, 17.6 * k), QPointF(14 * k, 19.6 * k))
 
 
 def draw_check(p, s, color):
