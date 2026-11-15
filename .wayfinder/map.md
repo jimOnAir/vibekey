@@ -42,6 +42,7 @@ sessions; nothing on this map builds it.
 
 <!-- one line per closed ticket: name + gist + link -->
 
+- [Panel & picker look on KDE](tickets/0005-panel-picker-prototype.md): **Variant A wins** — Panel is a window drawing the real AU05 (knob over mic/speaker end, 🎙/✓/✕ round caps in square housings, ⊗ end-bar) with clickable zones over the art (click = simulate, double-click = edit); header carries Knob-mode chip + Ring position + battery; status line narrates events with the *WOULD RUN / RAN* Preview distinction; picker = grouped-tile dialog + custom command/combo. Prototype: `prototype/panel-picker`.
 - [Agent-preset design for OpenCode/Orca](tickets/0006-agent-preset-design.md): ✓ = *next Session* and ✕ = *interrupt* fixed; knob press cycles **Knob mode** (default `Scroll, Sessions, Volume`, resets at boot), long-press = Enter; cycle steps the **Ring** of root Sessions, raising each **Host** (Orca `terminal switch` / `wmctrl`); interrupt is hybrid-target (focused window else Cursor), API-first, **never Ctrl+C**; standalone TUIs excluded from v1.
 - [OpenCode automation surface](tickets/0003-opencode-surface.md): on v2.2.7 all three agent ops have mechanisms — *interrupt* is a first-class idempotent `POST /api/session/{id}/interrupt` (keystroke fallback Esc only, **never Ctrl+C**); *next/prev* must be composed (API session ring of `ses_…` ids + host resolution via Orca row match or `OC | ` window title); no route publishes `tui.session.select`, and `--standalone` TUIs are API-opaque (title/window route only). Findings on `research/opencode-surface`.
 - [handy on X11/Arch](tickets/0002-handy-x11-arch.md): Dictation is feasible — Daemon injects a hold-pair (`xdotool keydown/keyup ctrl+alt+space`) against handy's **Tauri** `push_to_talk` mode (XTEST activates root-window grabs; press+release edges delivered). Pin the `tauri` backend (`handy_keys` never sees XTEST); ~0.5–2 s Parakeet latency; AUR `handy` 0.10.1 packages cleanly on Arch. Findings on `research/handy-x11-arch`.
@@ -55,7 +56,10 @@ sessions; nothing on this map builds it.
   nodes) matches the daemon's assumptions; still open: which knob-turn/press
   detection variant this firmware uses. Needs `vibekeyd --probe` against the
   running port with device access — probably graduates off-map as an
-  implementation-time probe, not a decision here.
+  implementation-time probe, not a decision here. A ready-made probe exists:
+  the prototype's *probe* window (`prototype/panel-picker`, pill → probe) logs
+  real X key events — it also answers whether the ⊗ end-bar is a 4th key and
+  the physical icon↔Control mapping.
 - **KDE tray autostart UX for the panel** (the daemon's autostart is settled;
   the panel's is not).
 - **Non-US keyboard layout handling** for key-combo assignments.
