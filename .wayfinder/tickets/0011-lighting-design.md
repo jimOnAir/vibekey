@@ -1,7 +1,7 @@
 ---
 title: "Lighting design: ring, blink, battery"
 type: wayfinder:grilling
-status: open
+status: closed
 assignee: jimOnAir
 blocked-by: []
 ---
@@ -33,3 +33,34 @@ device-side persistence. Decide:
 - Write discipline recap for the spec: single-writer module serialising
   Preset-emitted lighting events (from 0010's recommendation) — confirm as
   architecture.
+
+## Answer
+
+All accepted as recommended (grilling, 2026-11-15):
+
+- **Ring = Knob-mode indicator**: `Scroll → off` (the common default stays
+  silent; off is never ambiguous — it means "needs no attention"),
+  `Sessions → solid:8` (a Session is live), `Volume → breathe:8` (transient
+  adjustment); any custom mode without a pattern → `off`. Defaults editable.
+- **Failure blink**: **the keycap of the culprit Control** blinks three fast
+  times (b16); ring untouched; no ambient blinks — only reactions to presses.
+  (Fire-time blinks dodge the standby gotcha entirely: if the user pressed a
+  key, the device is awake.)
+- **Low battery**: ≤10% → ring `breathe:6` while it lasts + **one** notify-send
+  per crossing; hysteresis resets at >20%.
+- **Panel surface**: one Lighting section — three switches (mode-ring /
+  failure-blink / battery-blink) + one global brightness slider. Pattern
+  editing stays in `config.json` (no pattern editors in the Panel).
+- **Config schema** (accepted as drafted):
+
+  ```json
+  "lighting": {
+    "mode_ring": true, "fail_blink": true, "low_battery": true,
+    "brightness": 1.0,
+    "patterns": { "Scroll": "off", "Sessions": "solid:8", "Volume": "breathe:8" }
+  }
+  ```
+
+  `effect:brightness` strings; hot-reloaded by the existing config watcher.
+- **Architecture confirmed**: single-writer `lighting` module serialising
+  Preset-emitted lighting events over shared global device state (0010).
