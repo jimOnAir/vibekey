@@ -2,7 +2,7 @@
 title: "Panel & picker look on KDE"
 type: wayfinder:prototype
 status: open
-assignee:
+assignee: jimOnAir
 blocked-by: []
 assets:
 ---
