@@ -217,8 +217,8 @@ class KeypadWidget(QFrame):
     """Drawn to match the real AU05 (ulanzi.com product photos): aluminium
     bar; speaker mesh + Ulanzi logo + five mic slots at the far end;
     aluminium knob with recessed ring groove (LED ring lives there) and grip
-    notches; three square white keycaps (mic / accept-slash / cancel-cross,
-    each a central glyph between two open arcs); strap hole at the edge.
+    notches; three round white keycaps on square plates (mic / accept /
+    cancel, glyph rules per draw_* functions); strap hole at the edge.
     Interactive zones are transparent SimButtons positioned over the art."""
 
     W, H = 470, 150
@@ -288,12 +288,12 @@ class KeypadWidget(QFrame):
             x1, y1 = 170 + 32 * math.cos(math.radians(ang)), 75 - 32 * math.sin(math.radians(ang))
             x2, y2 = 170 + 38 * math.cos(math.radians(ang)), 75 - 38 * math.sin(math.radians(ang))
             p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
-        # three square white keycaps in square housings
+        # square plates with round white caps, per the close-up photos
         for cx in (260, 320, 380):
             p.setPen(QColor("#c3c5c9")); p.setBrush(QColor("#d6d8db"))
             p.drawRoundedRect(cx - 28, 75 - 28, 56, 56, 12, 12)
             p.setPen(QColor("#c0c2c6")); p.setBrush(QColor("#fafafa"))
-            p.drawRoundedRect(cx - 23, 75 - 23, 46, 46, 10, 10)
+            p.drawEllipse(cx - 23, 75 - 23, 46, 46)
         # strap hole at the far (right) edge
         p.setPen(QPen(QColor("#9c9ea3"), 1.5)); p.setBrush(QColor("#b9bcc0"))
         p.drawRoundedRect(self.W - 18, 75 - 6, 8, 12, 4, 4)
@@ -575,15 +575,15 @@ def _arcs(p, s, color, r=10.4, rot=0.0):
 
 
 def draw_mic(p, s, color):
-    """mic cap: plain mic glyph, no arcs — tall capsule, deep narrow yoke."""
+    """mic cap: exactly the AU05 engraving — capsule, shallow U yoke, short
+    tail; NO base line."""
     k = s / 28.0
     p.setPen(_pen(color, 2.1 * k)); p.setBrush(Qt.NoBrush)
-    p.drawRoundedRect(11.3 * k, 3.6 * k, 5.4 * k, 10.8 * k, 2.7 * k, 2.7 * k)
-    path = QPainterPath(); path.moveTo(9.2 * k, 10.4 * k)
-    path.cubicTo(9.2 * k, 18.4 * k, 18.8 * k, 18.4 * k, 18.8 * k, 10.4 * k)
+    p.drawRoundedRect(11.6 * k, 4.6 * k, 4.8 * k, 9.8 * k, 2.4 * k, 2.4 * k)
+    path = QPainterPath(); path.moveTo(9.6 * k, 10.6 * k)
+    path.cubicTo(9.6 * k, 18.6 * k, 18.4 * k, 18.6 * k, 18.4 * k, 10.6 * k)
     p.drawPath(path)
-    p.drawLine(QPointF(14 * k, 16.9 * k), QPointF(14 * k, 20.8 * k))
-    p.drawLine(QPointF(10.8 * k, 20.8 * k), QPointF(17.2 * k, 20.8 * k))
+    p.drawLine(QPointF(14 * k, 16.8 * k), QPointF(14 * k, 20.4 * k))
 
 
 def draw_check(p, s, color):
