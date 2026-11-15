@@ -47,12 +47,12 @@ window+tray, picker grouping, how "preview" is communicated.
   mode-cycle vs Enter pair.
 - **Picker = grouped-tile dialog + custom command / key-combo fields.**
 - **Button icon language: Ulanzi-style line art matching the physical caps** —
-  each square keycap's icon is a small central glyph (**mic capsule / slash /
-  cross**) framed by **two open arcs** (split circle, gaps top/bottom), seen
-  in product-photo close-ups; knob turn = open-ring ↺ ↻ arrows. Uniform
+  **mic cap: plain mic glyph, no arcs**; **accept/cancel caps: a central
+  glyph (slash / cross) between two open arcs, the split rotated 45°** (gap
+  diagonal, per owner's unit); knob turn = open-ring ↺ ↻ arrows. Uniform
   graphite strokes, rounded caps/join, invert to white on press. Renderers
-  `draw_mic/draw_check/draw_cross/draw_turn` + `_arcs()` + `line_icon()` in
-  `prototype_panel_picker.py` (verified via offscreen grabs,
+  `draw_mic/draw_check/draw_cross/draw_turn` + `_arcs(rot=)` + `line_icon()`
+  in `prototype_panel_picker.py` (verified via offscreen grabs,
   `preview_keypad.py`).
 - **Tray icon + menu** for re-showing the Panel; *Preview* is a
   checkbox in the Panel, default on. Final icon: **glossy purple circle with
