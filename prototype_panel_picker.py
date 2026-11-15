@@ -21,8 +21,9 @@
 import json
 import sys
 
-from PySide6.QtCore import Qt, QElapsedTimer, QPointF, QRectF
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut
+from PySide6.QtCore import Qt, QElapsedTimer, QPointF, QRectF, QSize
+from PySide6.QtGui import (QAction, QColor, QFont, QIcon, QKeySequence, QPainter,
+                           QPainterPath, QPen, QPixmap, QShortcut)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFrame, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
@@ -224,29 +225,34 @@ class KeypadWidget(QFrame):
         import math
         super().__init__()
         self.setFixedSize(self.W, self.H)
-        spec = [  # (key, icon, cx, cy, r) — zones over the drawn art
-            ("knob_press", "", 74, 75, 36),
-            ("voice", "🎙", 168, 75, 24),
-            ("confirm", "✓", 233, 75, 24),
-            ("cancel", "✕", 298, 75, 24),
+        spec = [  # (key, line-icon fn, cx, cy, r) — zones over the drawn art
+            ("knob_press", None, 74, 75, 36),
+            ("voice", draw_mic, 168, 75, 24),
+            ("confirm", draw_check, 233, 75, 24),
+            ("cancel", draw_cross, 298, 75, 24),
         ]
-        for key, icon, cx, cy, r in spec:
-            b = SimButton(model, key, icon, edit_cb, self)
+        for key, fn, cx, cy, r in spec:
+            b = SimButton(model, key, "", edit_cb, self)
             b.setFlat(True)
-            size = 15 if key == "voice" else 19
             b.setStyleSheet(
-                "QPushButton{background:transparent;border:none;font-size:%dpx;color:#55585e}"
-                "QPushButton:pressed{background:rgba(61,132,246,150);border-radius:%dpx;color:white}" % (size, r))
+                "QPushButton{background:transparent;border:none}"
+                "QPushButton:pressed{background:rgba(61,132,246,150);border-radius:%dpx}" % r)
+            if fn:
+                px = int(r * 1.1)
+                b.setIcon(line_icon(fn, px))
+                b.setIconSize(QSize(px, px))
             b.setGeometry(cx - r, cy - r, 2 * r, 2 * r)
-            tip = {"voice": "🎙 Voice key (mic)", "confirm": "✓ accept",
+            tip = {"voice": "mic — Voice key", "confirm": "✓ accept",
                    "cancel": "✕ cancel"}.get(key, f"Knob — hold ≥{LONG_MS} ms = Enter")
             b.setToolTip(tip)
         for key, dx in (("knob_l", -1), ("knob_r", 1)):
-            b = SimButton(model, key, "⟲" if dx < 0 else "⟳", None, self)
+            b = SimButton(model, key, "", None, self)
             b.setFlat(True)
-            b.setStyleSheet("QPushButton{background:transparent;border:none;color:#8a8d93;font-size:14px}"
-                            "QPushButton:pressed{color:#3d84f6}")
-            b.setGeometry(74 + dx * 52 - 12, 75 - 48, 24, 22)
+            b.setStyleSheet("QPushButton{background:transparent;border:none}"
+                            "QPushButton:pressed{background:rgba(61,132,246,70);border-radius:10px}")
+            b.setIcon(line_icon(draw_turn(dx > 0), 22))
+            b.setIconSize(QSize(22, 22))
+            b.setGeometry(74 + dx * 54 - 13, 75 - 50, 26, 26)
             b.setToolTip("knob turn " + ("◀" if dx < 0 else "▶"))
 
     def paintEvent(self, e):
@@ -272,11 +278,13 @@ class KeypadWidget(QFrame):
             p.drawRoundedRect(cx - 28, 75 - 28, 56, 56, 12, 12)
             p.setPen(Qt.NoPen); p.setBrush(QColor("#fafafa"))
             p.drawEllipse(cx - 22, 75 - 22, 44, 44)
-        # long end-bar with ⊗
+        # long end-bar with line-art ⊗
         p.setPen(QColor("#b6b8bc")); p.setBrush(QColor("#eceef0"))
         p.drawRoundedRect(340, 47, 112, 56, 14, 14)
-        p.setPen(QColor("#7c7f85")); p.setFont(QFont("sans", 13))
-        p.drawText(340, 47, 112, 56, Qt.AlignCenter, "⊗")
+        p.save()
+        p.translate(396 - 22, 75 - 22)
+        draw_cross_circle(p, 44, "#7c7f85")
+        p.restore()
         # mic slots + logo near the knob end
         p.setPen(Qt.NoPen); p.setBrush(QColor("#9c9ea3"))
         for i in range(4):
@@ -530,6 +538,89 @@ def draw_app_icon(pm):
     p.setFont(QFont("sans", int(s * 0.44), QFont.Bold))
     p.drawText(QRectF(0, -s * 0.03, s, s), Qt.AlignCenter, "U")
     p.end()
+
+
+# ---------------------------------------------------- line-art key icons ------
+INK = "#55585e"  # engraved-cap graphite, matches the drawn caps
+
+
+def _pen(color, w):
+    from PySide6.QtGui import QPen
+    return QPen(QColor(color), w, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+
+
+def draw_mic(p, s, color):
+    k = s / 28.0
+    p.setPen(_pen(color, 2.2 * k)); p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(11 * k, 4 * k, 6 * k, 12 * k, 3 * k, 3 * k)
+    path = QPainterPath(); path.moveTo(8.5 * k, 13 * k)
+    path.cubicTo(8.5 * k, 21 * k, 19.5 * k, 21 * k, 19.5 * k, 13 * k)
+    p.drawPath(path)
+    p.drawLine(QPointF(14 * k, 19.5 * k), QPointF(14 * k, 24 * k))
+    p.drawLine(QPointF(9.5 * k, 24 * k), QPointF(18.5 * k, 24 * k))
+
+
+def draw_check(p, s, color):
+    k = s / 28.0
+    p.setPen(_pen(color, 2.8 * k)); p.setBrush(Qt.NoBrush)
+    path = QPainterPath(QPointF(7.5 * k, 15 * k))
+    path.lineTo(12.5 * k, 20 * k); path.lineTo(20.5 * k, 8.5 * k)
+    p.drawPath(path)
+
+
+def draw_cross(p, s, color):
+    k = s / 28.0
+    p.setPen(_pen(color, 2.8 * k))
+    p.drawLine(QPointF(9 * k, 9 * k), QPointF(19 * k, 19 * k))
+    p.drawLine(QPointF(19 * k, 9 * k), QPointF(9 * k, 19 * k))
+
+
+def draw_cross_circle(p, s, color):
+    k = s / 28.0
+    p.setPen(_pen(color, 2.0 * k)); p.setBrush(Qt.NoBrush)
+    p.drawEllipse(QRectF(6 * k, 6 * k, 16 * k, 16 * k))
+    p.drawLine(QPointF(11 * k, 11 * k), QPointF(17 * k, 17 * k))
+    p.drawLine(QPointF(17 * k, 11 * k), QPointF(11 * k, 17 * k))
+
+
+def draw_turn(cw):
+    def fn(p, s, color):
+        import math
+        k = s / 28.0
+        cx = cy = 14 * k; r = 8.0 * k
+        a0 = 60.0 if cw else 120.0
+        span = -300.0 if cw else 300.0
+        pts = []
+        steps = 30
+        for i in range(steps + 1):
+            a = math.radians(a0 + span * i / steps)
+            pts.append(QPointF(cx + r * math.cos(a), cy - r * math.sin(a)))
+        p.setPen(_pen(color, 3.0 * k))
+        for i in range(steps):
+            p.drawLine(pts[i], pts[i + 1])
+        last, prev = pts[-1], pts[-2]
+        dx, dy = last.x() - prev.x(), last.y() - prev.y()
+        L = math.hypot(dx, dy) or 1.0
+        dx, dy = dx / L, dy / L
+        px, py = -dy, dx
+        h, w = 7.5 * k, 4.6 * k
+        p.setPen(Qt.NoPen); p.setBrush(QColor(color))
+        p.drawPolygon([QPointF(last.x() + dx * h, last.y() + dy * h),
+                       QPointF(last.x() + px * w, last.y() + py * w),
+                       QPointF(last.x() - px * w, last.y() - py * w)])
+    return fn
+
+
+def line_icon(fn, px=28):
+    """QIcon with normal (graphite) + active (white, for pressed caps) pixmaps."""
+    normal = QPixmap(px, px); normal.fill(Qt.transparent)
+    p = QPainter(normal); p.setRenderHint(QPainter.Antialiasing); fn(p, px, INK); p.end()
+    active = QPixmap(px, px); active.fill(Qt.transparent)
+    p = QPainter(active); p.setRenderHint(QPainter.Antialiasing); fn(p, px, "#ffffff"); p.end()
+    ic = QIcon()
+    ic.addPixmap(normal, QIcon.Normal)
+    ic.addPixmap(active, QIcon.Active)
+    return ic
 
 
 class ProbeWindow(QMainWindow):
