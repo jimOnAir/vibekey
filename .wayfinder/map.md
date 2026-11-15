@@ -42,6 +42,7 @@ sessions; nothing on this map builds it.
 
 <!-- one line per closed ticket: name + gist + link -->
 
+- [Packaging & install spec](tickets/0008-packaging-install-spec.md): single `vibekey` package — `depends=(python pyside6 xdotool wmctrl libnotify)`, `handy`/`orca` as optdepends; package-owned **static `MODE=0660 GROUP=vibekey` udev rule** + `sysusers.d`, the one `gpasswd -a` step detected-and-taught by the app; user unit enabled via README or first-run Panel button (`After=graphical-session.target`); Panel **"Launch at login" checkbox** → XDG autostart; own 0.1.0 versioning pinning upstream; user state survives uninstall.
 - [Backlight control: keycap LEDs + knob ring](tickets/0010-backlight-control.md): **feasible today — fully documented** (TEA `0x55` SET commands, 4 MONOCHROME channels: 3 keycaps + knob ring; mode/effect/brightness 0–20, **no colour**, persisted device-side). Write path proven by upstream's own battery writes under Grab; gotchas catalogued (64-byte frames, all-4-records, stale readback → trust `0x14` ack, writes dropped in standby). Cost: shared `lighting` module ~1 day; ring-as-mode-indicator ½ day; blink runner +1 day; battery blink XS. Findings on `research/backlight-control`.
 - [Dictation preset spec](tickets/0007-dictation-preset-spec.md): Panel owns the chord (`ctrl+alt+space` default) with drift → warning + **consented "Fix handy"** button; prerequisites (`tauri` backend, `push_to_talk`) checked by the Panel at open, not gated at fire; **no fallback mode in v1**; Daemon `pgrep`s handy at fire → notify-send if absent, never auto-start; a read-only **"handy" card** shows detected-vs-recommended settings (`always_on_microphone` ON, overlay off); published latency ~0.5–2 s.
 - [Panel & picker look on KDE](tickets/0005-panel-picker-prototype.md): **Variant A wins** — Panel is a window drawing the real AU05 (knob over mic/speaker end, 🎙/✓/✕ round caps in square housings, ⊗ end-bar) with clickable zones over the art (click = simulate, double-click = edit); header carries Knob-mode chip + Ring position + battery; status line narrates events with the *WOULD RUN / RAN* Preview distinction; picker = grouped-tile dialog + custom command/combo. Prototype: `prototype/panel-picker`.
@@ -63,8 +64,6 @@ sessions; nothing on this map builds it.
   real X key events — it also settles the physical icon↔Control mapping.
   (The "⊗ end-bar" question is closed: build photos show only 3 square caps —
   no 4th key.)
-- **KDE tray autostart UX for the panel** (the daemon's autostart is settled;
-  the panel's is not).
 - **Non-US keyboard layout handling** for key-combo assignments.
 - **Lighting bench probes** (×3, ~1 h each: standby write-drop behaviour, ack
   reliability, frame truncation) — implementation-time, closes the residual
