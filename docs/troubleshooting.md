@@ -46,11 +46,12 @@ Work the chain:
 0. **Tray mic badge?** An orange mic-with-slash on the tray icon (or the ✗ line
    atop the Panel's handy card) means Dictation's mic is unusable right now:
    Dongle unplugged, keypad **asleep/off** (press any AU05 key — it answers and
-   the badge clears within a second), or no/unmuted-less audio input. Note the
-   reverse is not a guarantee: a hardware mute switch on a wired mic changes
-   nothing in the audio stack (cheap chips report no jack events), so if the
-   badge is quiet yet nothing transcribes, record a two-second proof
-   (`arecord -d 2 t.wav`) and play it back before blaming the chain below.
+   the badge clears within a second), the AU05 mic disabled by its own switch
+   (the power card says `mic DISABLED on device`), or no/muted system input.
+   The one thing no software can see: a hardware mute on some *other* wired
+   mic — audio stack reports it live and deaf alike. If the badge is quiet yet
+   nothing transcribes, record a two-second proof (`arecord -d 2 t.wav`) and
+   play it back before blaming the chain below.
 1. **Is handy running?** vibekey never starts it — `pgrep -x handy`, and check
    the tray (Plasma hides icons by default — the `^` overflow).
 2. **Right backend?** handy must keep `keyboard_implementation = tauri`.

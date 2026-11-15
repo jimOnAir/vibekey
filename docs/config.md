@@ -45,6 +45,7 @@ respected (only a *missing* file is seeded).
 
   "lighting": {                      // every key optional — defaults in code
     "mode_ring": true, "fail_blink": true, "low_battery": true,
+    "attention_ring": true,          // §5.7: alarm rhythm on pending approval
     "brightness": 1.0,               // 0.0–1.0 multiplier on all written levels
     "patterns": {                    // by Knob-mode LABEL; missing label → "off"
       "Scroll": "off", "Sessions": "heartbeat:8", "Volume": "breathe:8"
@@ -89,6 +90,7 @@ without disturbing the other:
 | `state.json` | Daemon (in-place rewrite per event) | Panel (watcher + poll) | `connected`, `access`, `grabbed`, `battery`, `keypad{online, at}` (wireless link — asleep/off keypad still has its USB nodes), `knob_mode`, `knob_position`, `last` (narrated event), `lighting{device_mode, channels, last_error}`, `error`/`last_error` |
 | `preview` | Panel (`open` every 2 s while shown, `closed` on hide) | Daemon | freshness ≤ 6 s; while live, nothing runs |
 | `manage_lights` | Panel (one-shot `"manage"`) | Daemon (consumes) | the consented [Device lighting mode](lighting.md#device-lighting-mode) request |
+| `power` | Panel (one-shot JSON `standby_s`/`sleep_s`/`enc`) | Daemon (consumes) | the consented device power/noise-reduction writes; the Daemon re-reads and the Panel shows the truth |
 | `lock` | `flock` by the Daemon | — | double-start guard |
 
 Package files: `/usr/lib/vibekey/{bin/vibekeyd,bin/vibekey-config,actions.json}`

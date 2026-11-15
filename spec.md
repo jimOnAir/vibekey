@@ -112,9 +112,10 @@ Config dir `~/.config/vibekey/`, runtime dir `$XDG_RUNTIME_DIR/vibekey/`:
 | `config.json` | only via `vibekey-config` (atomic replace) | Daemon (0.5 s mtime poll + SIGHUP), Panel | schema §4 |
 | `seen.json` | Daemon (per press) | Panel | learned raw ids for Alias UX |
 | `actions.json` (catalogue) | package (`/usr/lib/vibekey/actions.json`) | Daemon (seed + behavior-presets), Panel (picker) | resolved relative to the package dir, **not** `bin/`-relative — a wrong path silently no-ops first-run seeding (risk R6) |
-| `state.json` | Daemon only, rewritten in place on every event | Panel (`QFileSystemWatcher` + 1 s/5 s poll) | fields: upstream set (`version,pid,connected,access,grabbed,mouse_passthrough,preview,knob_position,device,battery,last,events,error,updated`) **plus** `knob_mode` (§5.3), `last_error` (§5.3 failure surface), `keypad` (`online`, `at` — wireless-link state, §5.6) and `lighting` incl. `device_mode`: `0|1|2|"unknown"|"disabled"`, `pending_mode`, `last_error` (§5.5) |
+| `state.json` | Daemon only, rewritten in place on every event | Panel (`QFileSystemWatcher` + 1 s/5 s poll) | fields: upstream set (`version,pid,connected,access,grabbed,mouse_passthrough,preview,knob_position,device,battery,last,events,error,updated`) **plus** `knob_mode` (§5.3), `last_error` (§5.3 failure surface), `keypad` (`online`, `at` — wireless-link state, §5.6), `power` (`standby_s`, `sleep_s`, `mic_enabled`, `enc` — device telemetry, §5.7), `attention` (`sid` while an agent awaits approval, else `null`, §5.7) and `lighting` incl. `device_mode`: `0|1|2|"unknown"|"disabled"`, `pending_mode`, `last_error` (§5.5) |
 | `preview` | Panel (`open` every 2 s while shown, `closed` on hide) | Daemon (trusts `open` for 6 s) | while active: events are reported, nothing runs |
 | `manage_lights` | Panel (one-shot `"manage"`) | Daemon (consumes + unlinks on its 0.5 s poll) | the consented Manage lights request (§5.5) — the Panel never touches the vendor channel |
+| `power` | Panel (one-shot JSON: `standby_s`/`sleep_s`/`enc`) | Daemon (consumes) | consented device power & noise-reduction writes (§5.7); every write is read back |
 
 Preview semantics: with Preview on, the Daemon still publishes the event
 (`last` with the would-be action name) but suppresses the Assignment and the
@@ -172,13 +173,15 @@ vs *RAN (sim)* for its own simulated clicks (§8).
   extension (owner request, 2026-11-15). `patterns` values are strings
   addressed by Knob-mode **label**; a mode with no entry → `off`. Grammar:
   `off` | `solid:<0-20>` | `breathe:<0-20>` | `<rhythm>[:<level>[:<period_ms>]]`
-  where `<rhythm>` ∈ `pulse` · `heartbeat` · `tick` · `wave` · `gallop`
-  (host-driven sequences, §5.5; level default 8). Code defaults:
+  where `<rhythm>` ∈ `pulse` · `heartbeat` · `tick` · `wave` · `gallop` (host-driven
+  sequences, §5.5; level default 8) · `alarm` (reserved for §5.7's
+  awaiting-approval override). Code defaults:
   `Scroll:off`, `Sessions:heartbeat:8`, `Volume:breathe:8`.
   `brightness` is a multiplier (0.0–1.0) applied to every level the lighting
   module writes (effective level = level × brightness).
   Hot-reloaded by the existing 0.5 s config poll. The switches are feature
-  toggles: `mode_ring` §5.3, `fail_blink` §5.4, `low_battery` §5.4.
+  toggles: `mode_ring` §5.3, `fail_blink` §5.4, `low_battery` §5.4,
+  `attention_ring` §5.7.
 - **`grab`** / **`battery`** / **`aliases`**: upstream semantics; `battery` now
   also gates the link-keepalive probe (§5.6) — with it off, link state stays
   optimistic.
@@ -414,21 +417,52 @@ The AU05 is wireless behind the Dongle: it drops its 2.4 GHz link after ~5
 idle minutes (or a power switch), while its USB nodes and its PipeWire mic
 source **remain** — so neither `/dev` presence nor `pactl` can distinguish
 "keypad off" from "keypad idle" (field-proven: capture returns digital
-silence while the node is up). The Daemon therefore owns the truth:
+silence while the node is up). The Daemon owns the truth, **authoritatively**:
 
-- the battery poll (every 15 s, `BATTERY_INTERVAL`) doubles as a keepalive —
-  a vendor answer to any request, or any input event, refreshes `last_contact`;
-- no contact for `LINK_STALE` (40 s) → `state.json` publishes
-  `keypad: {"online": false, "at": …}`; first event/reply republishes true;
-- optimistic at connect (ticket 12's posture); with config `battery: false`
-  the probe is off and the online posture stands (documented trade-off).
+- `06 03 0A 01` (docs/SOURCES.md) is answered by the **Dongle itself** — even
+  with the keypad powered off; its byte 4 is the linked state. Queried every
+  `BATTERY_INTERVAL` (15 s, piggybacked on the battery request) → instant
+  `keypad: {"online": …}` in `state.json`. Pushed notices `0B 0B` (link),
+  `0B 0D` (standby), `0F0` (mic powered on) are consumed when firmware sends
+  them (unverified emission without the host-online handshake — harmless).
+- Fallback while no link query has been answered (`battery: false`, odd
+  firmware): the 40 s `LINK_STALE` silence heuristic (events + mic-relayed
+  replies as contact) — published with `via` for debuggability.
+- Optimistic at connect; `last_contact` is refreshed only by **mic-proof**
+  traffic (the Dongle's own link answer never counts as the keypad being up).
 
 The Panel's tray mic badge and handy card consume it: **badge = the AU05's
-Dictation mic is unusable now** — dongle gone (`connected: false`), keypad
-asleep/off (`keypad.online: false`), or the audio stack is broken (missing /
-muted, the only pactl-sourced case). The keypad cannot be woken from the host
-(writes to a sleeping keypad are dropped, §5.4) — the badge tells the user to
-press a key, which is itself the proof of life.
+Dictation mic is unusable now** — Dongle gone (`connected: false`), keypad
+asleep/off (`keypad.online: false`), mic disabled on the device
+(`power.mic_enabled: false`), or the audio stack is broken (missing/muted —
+the only pactl-sourced case). The keypad cannot be woken from the host
+(writes into sleep are dropped, §5.4) — the badge says press a key, which is
+itself the proof of life.
+
+### 5.7 Device power config, mic info, awaiting-approval ring (owner batch, 2026-11-15)
+
+Three vendor-channel features with layouts per [docs/SOURCES.md](docs/SOURCES.md)
+(vibed captured on 4.4.0, vibekey-lite device-observed reads):
+
+- **Telemetry** (`state.json: power`): standby delay GET `01 01 2C 01`, sleep
+  delay GET `01 01 42 01` (u32-le seconds at payload offset 4), mic enable
+  GET `01 01 2A 01` (byte 4), noise reduction GET `01 01 90 01` (level@4,
+  low u16@5, high u16@7). Read on link-up and every 5 min; skipped while the
+  keypad is offline (those frames would die in the radio dark).
+- **Consented writes** (the `power` one-shot file, manage_lights pattern):
+  SET ops are `01 01 2C 02` / `01 01 42 02` (+u32-le) and `01 01 90 04`
+  (+level, low, high) — note the differing op bytes. The Panel's
+  "Device (power & mic)" box is the only author; every Apply re-GETs
+  promptly and the card shows what the device actually reports (vibed lists
+  writes that ack-but-don't-persist — the readback is the contract).
+- **Awaiting-approval alarm**: every 5 s the Daemon asks
+  `GET /api/session/{cursor}/permission` (v2 API) for the Cursor Session;
+  a non-empty list means the agent is blocked. While true the ring runs the
+  `alarm` rhythm (overrides the mode pattern, low_battery latch still outranks
+  it), `state.json: attention` publishes `{sid, at}`, the status line says
+  "hold the knob for Enter" — the knob's long-press is exactly the accept
+  gesture for that Session. Standalone TUIs stay invisible (documented gap);
+  `lighting.attention_ring` (default on) switches it off entirely.
 
 ## 6. xdotool specifics for the Panel (editors)
 

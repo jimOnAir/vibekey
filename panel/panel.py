@@ -19,9 +19,9 @@ from PySide6.QtCore import Qt, QFileSystemWatcher, QTimer, QPointF, QRectF, QSiz
 from PySide6.QtGui import (QAction, QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap,
                            QRadialGradient)
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
+    QApplication, QCheckBox, QComboBox, QDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QPlainTextEdit, QPushButton, QSlider,
-    QStatusBar, QSystemTrayIcon, QVBoxLayout, QWidget,
+    QSpinBox, QStatusBar, QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
 # ---------------------------------------------------------------------------
@@ -32,6 +32,7 @@ CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 STATE_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "vibekey", "state.json")
 MANAGE_LIGHTS_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "vibekey", "manage_lights")
+POWER_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "vibekey", "power")
 PREVIEW_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "vibekey", "preview")
 AUTOSTART_FILE = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
                               "autostart", "vibekey-panel.desktop")
@@ -130,6 +131,8 @@ def mic_badge(state, stack_state):
         return True, "AU05 not connected — Dictation mic offline"
     if (state.get("keypad") or {}).get("online") is False:
         return True, "AU05 asleep or switched off — press a key to wake it"
+    if (state.get("power") or {}).get("mic_enabled") is False:
+        return True, "microphone disabled on the keypad itself"
     if stack_state == "missing":
         return True, "microphone not connected"
     if stack_state == "muted":
@@ -626,6 +629,7 @@ class PanelWindow(QMainWindow):
         right.addLayout(knob_row)
 
         right.addWidget(self.build_lighting_box())
+        right.addWidget(self.build_power_box())
         autostart_row = QHBoxLayout()
         self.autostart_cb = QCheckBox("Launch at login")
         self.autostart_cb.setChecked(os.path.exists(AUTOSTART_FILE))
@@ -748,6 +752,9 @@ class PanelWindow(QMainWindow):
 
         self.refresh_handy_card()
         self.refresh_lighting()
+        self.refresh_power()
+        if st.get("attention"):
+            self.set_status("⚠ Session awaiting approval — hold the knob for Enter")
         if not self.unit_enabled():
             self.enable_btn.show()
         else:
@@ -927,7 +934,8 @@ class PanelWindow(QMainWindow):
         self.light_checks = {}
         for key, label in (("mode_ring", "Knob-mode ring indicator"),
                            ("fail_blink", "Failure blink on the culprit keycap"),
-                           ("low_battery", "Low-battery ring breathe")):
+                           ("low_battery", "Low-battery ring breathe"),
+                           ("attention_ring", "Alarm ring while an agent awaits approval")):
             cb = QCheckBox(label)
             cb.toggled.connect(lambda _v: self.save_lighting())
             lay.addWidget(cb)
@@ -979,6 +987,102 @@ class PanelWindow(QMainWindow):
             self.device_mode_line.setText("Device lighting mode: Working.")
             self.device_mode_line.show()
             self.manage_btn.hide()
+
+    # ---- Device power & microphone (spec §5.7, docs/SOURCES.md) -------------
+
+    STANDBY_CHOICES = [(180, "3 min"), (300, "5 min"), (600, "10 min"), (900, "15 min"),
+                       (1800, "30 min"), (3600, "60 min")]
+    SLEEP_CHOICES = [(3600, "1 h"), (7200, "2 h"), (10800, "3 h"), (14400, "4 h"), (0, "Never")]
+
+    def build_power_box(self):
+        box = QGroupBox("Device (power & mic)")
+        lay = QVBoxLayout(box)
+        self.power_line = QLabel()
+        self.power_line.setWordWrap(True)
+        lay.addWidget(self.power_line)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Standby"))
+        self.standby_cb = QComboBox()
+        for secs, label in self.STANDBY_CHOICES:
+            self.standby_cb.addItem(label, secs)
+        row.addWidget(self.standby_cb)
+        row.addWidget(QLabel("Sleep"))
+        self.sleep_cb = QComboBox()
+        for secs, label in self.SLEEP_CHOICES:
+            self.sleep_cb.addItem(label, secs)
+        row.addWidget(self.sleep_cb)
+        lay.addLayout(row)
+        row2 = QHBoxLayout()
+        self.enc_cb = QCheckBox("Noise reduction")
+        self.enc_low = QSpinBox()
+        self.enc_low.setRange(0, 65535)
+        self.enc_high = QSpinBox()
+        self.enc_high.setRange(0, 65535)
+        row2.addWidget(self.enc_cb)
+        row2.addWidget(QLabel("low"))
+        row2.addWidget(self.enc_low)
+        row2.addWidget(QLabel("high"))
+        row2.addWidget(self.enc_high)
+        row2.addStretch(1)
+        lay.addLayout(row2)
+        self.power_apply = QPushButton("Apply to the AU05")
+        self.power_apply.setToolTip("Writes standby/sleep/noise-reduction into the device's own "
+                                    "config (consented; read back after the write)")
+        self.power_apply.clicked.connect(self.apply_power)
+        lay.addWidget(self.power_apply)
+        self.power_box = box
+        return box
+
+    def _select_cb(self, combo, value):
+        if value is None:
+            return
+        for i in range(combo.count()):
+            if combo.itemData(i) == value:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(i)
+                combo.blockSignals(False)
+                return
+        combo.setToolTip("current value: %s (custom)" % value)
+
+    def refresh_power(self):
+        power = self.state.get("power") or {}
+        if not power:
+            self.power_line.setText("· power info: not read yet (needs the keypad awake — "
+                                    "press a key)")
+            self.power_apply.setEnabled(False)
+            return
+        self.power_apply.setEnabled(True)
+        self._select_cb(self.standby_cb, power.get("standby_s"))
+        self._select_cb(self.sleep_cb, power.get("sleep_s"))
+        enc = power.get("enc") or {}
+        if enc:
+            self.enc_cb.blockSignals(True)
+            self.enc_cb.setChecked(bool(enc.get("level")))
+            self.enc_cb.blockSignals(False)
+            self.enc_low.setValue(int(enc.get("low", 0)))
+            self.enc_high.setValue(int(enc.get("high", 0)))
+        bits = []
+        if power.get("standby_s") is not None:
+            bits.append("standby %d min" % (power["standby_s"] // 60))
+        if power.get("sleep_s") is not None:
+            bits.append("sleep %s" % ("never" if power["sleep_s"] == 0 else "%d min" % (power["sleep_s"] // 60)))
+        if power.get("mic_enabled") is False:
+            bits.append("<span style='color:#c0392b'><b>mic DISABLED on device</b></span>")
+        self.power_line.setText("· device: " + " · ".join(bits) if bits
+                                else "· device: reading pending…")
+
+    def apply_power(self):
+        req = {"standby_s": self.standby_cb.currentData(),
+               "sleep_s": self.sleep_cb.currentData(),
+               "enc": {"level": 1 if self.enc_cb.isChecked() else 0,
+                       "low": self.enc_low.value(), "high": self.enc_high.value()}}
+        try:
+            os.makedirs(os.path.dirname(POWER_PATH), exist_ok=True)
+            with open(POWER_PATH, "w", encoding="utf-8") as handle:
+                json.dump(req, handle)
+            self.set_status("power settings queued — read-back will confirm")
+        except OSError as error:
+            self.set_status("could not queue power settings: %s" % error)
 
     def save_lighting(self):
         merged = self.config.get("lighting") or {}
@@ -1093,6 +1197,8 @@ class TrayApp:
         mic_off, mic_tip = mic_badge(state, self.mic)
         if mic_off:
             tip += " · " + mic_tip
+        if state.get("attention"):
+            tip += " · agent awaits approval (hold knob = Enter)"
         if problem:
             tip += " · see the Panel (attention badge)"
         tray.setIcon(self.build_icon(problem, mode.get("id"), label, mic_off))

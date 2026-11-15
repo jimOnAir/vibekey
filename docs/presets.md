@@ -41,9 +41,10 @@ the Daemon brackets your hold with handy's hotkey —
   accurate tiers take seconds),
 - the Panel's tray badge watches the mic path end to end: Dongle unplugged,
   keypad asleep/off (its link drops after ~5 idle minutes — a key press wakes
-  it and clears the badge), or the system input gone/muted → orange
-  mic-with-slash. Your Dictation mic is the AU05's built-in one, so the
-  badge tracks *that keypad's* link first of all.
+  it and clears the badge), the AU05's mic switched off on the device itself,
+  or the system input gone/muted → orange mic-with-slash. Your Dictation mic
+  is the AU05's built-in one, so the badge tracks *that keypad's* state first
+  of all.
 
 Recommended handy settings, all graded by the handy card: push to talk,
 always-on microphone, overlay off, typing tool `xdotool`, a fast model tier on
@@ -69,7 +70,10 @@ raises that Session's **Host**:
 The Cursor may drift when you switch Sessions by hand — accepted for v1; a
 step simply catches up to the Ring. Deleted Session ids skip to the next valid
 id (and tell you). `Previous Session` and `Focus this Session's terminal`
-(Raise without stepping) are in the catalogue too.
+(Raise without stepping) are in the catalogue too. While the Cursor's Session
+blocks on a permission prompt the knob ring runs the **alarm** rhythm and the
+Panel says *hold the knob for Enter* — the accept gesture meets the request
+where it is raised (switch under Lighting).
 
 ### Interrupt
 

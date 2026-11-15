@@ -20,6 +20,16 @@ never having two hands on the wheel.
 Switches for all three live in the Panel's Lighting section; the patterns
 themselves are config-editable ([docs/config.md](config.md)).
 
+## The alarm: "an agent is waiting for you"
+
+When the **Cursor Session** (the one the ring is pointing at) has a pending
+permission request, the Daemon overrides the ring with the `alarm` rhythm —
+double-ticks until you answer. The status line and tray tooltip say what to
+do: **hold the knob** (that's Enter). Scoped v1: the Cursor Session only, on
+the shared OpenCode service (standalone TUIs stay invisible, as elsewhere),
+and it yields to the low-battery breathe. Switch: *Alarm ring while an agent
+awaits approval* (`lighting.attention_ring`, default on).
+
 ## Ring rhythms
 
 A pattern string says *what the ring does*:
@@ -41,6 +51,7 @@ A pattern string says *what the ring does*:
 | `tick` | dry metronome blip, like a clock | 1.3 s | `▇▁ … ▇▁` |
 | `wave` | long tide, seven eased steps up and down | 2.4 s | `▁▃▆█▆▃▂ …` |
 | `gallop` | three-beat clip-clop | 2.2 s | `▄█▂▅█▂▇▁ …` |
+| `alarm` | urgent double-tick (reserved: §see below) | 1.4 s | `█▁█▁▄▁ …` |
 
 Defaults out of the box: **Scroll `off` · Sessions `heartbeat:8` · Volume
 `breathe:8`** — silence for the idle case, a living pulse where a Session is

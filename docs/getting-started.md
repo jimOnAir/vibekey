@@ -68,17 +68,25 @@ Open **vibekey Panel** (applications menu, or `vibekey-panel`).
   *runs*. Close the window (or uncheck Preview) and your Assignments fire.
 - The **handy card** grades your dictation setup ✓/✗ — read-only, except the
   one consented **Fix handy** button.
-- **Lighting** holds the three feature switches, the brightness slider, and
-  (if your device mode says so) the consented **Manage lights** action
-  ([docs/lighting.md](lighting.md#device-lighting-mode)).
+- **Lighting** holds the feature switches (including the awaiting-approval
+  *alarm ring*), the brightness slider, and (if your device mode says so) the
+  consented **Manage lights** action ([docs/lighting.md](lighting.md#device-lighting-mode)).
+- **Device (power & mic)** reads the keypad's own stored settings: standby
+  minutes, sleep/power-off ("Never" included), and the dual-mic noise
+  reduction — **Apply to the AU05** writes them into the device (consented;
+  the values shown afterwards are read back from it). While here, the
+  `mic DISABLED on device` flag means the AU05's own mic is switched off in
+  hardware.
 - The tray icon mirrors the Knob mode with a corner glyph
   ![tray modes](images/tray-modes.png), grows an orange **!** when the Daemon
   needs attention, and shows an orange **mic-with-slash** badge whenever your
   **Dictation mic is unusable**: the AU05 Dongle is unplugged, the keypad is
-  **asleep or switched off** (its USB/mic nodes stay — the Daemon's vendor
-  keepalive knows), or the system audio has no/muted input. A hardware mute
-  switch on a wired mic changes nothing in the audio stack, so it cannot warn;
-  a two-second test recording is the proof there.
+  **asleep or switched off** (its USB/mic nodes stay — the Daemon asks the
+  Dongle directly and knows), the AU05's own mic is switched off in hardware
+  (`mic DISABLED on device` in the power card), or the system audio has
+  no/muted input. A mute switch on some *other* wired mic changes nothing in
+  the audio stack, so it cannot warn; a two-second test recording is the
+  proof there.
 
 ## 6 · Wire the optional half
 

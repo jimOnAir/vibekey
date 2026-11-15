@@ -61,6 +61,7 @@ RUNTIME_DIR = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "vibekey")
 STATE_PATH = os.path.join(RUNTIME_DIR, "state.json")
 LOCK_PATH = os.path.join(RUNTIME_DIR, "lock")
 MANAGE_LIGHTS_PATH = os.path.join(RUNTIME_DIR, "manage_lights")  # Panel's consented Manage lights request
+POWER_PATH = os.path.join(RUNTIME_DIR, "power")  # Panel's consented standby/sleep/ENC writes (JSON)
 
 EVIOCGRAB = 0x40044590
 INPUT_EVENT_SIZE = struct.calcsize("llHHi")
@@ -208,6 +209,15 @@ def vendor_decode(report):
 
 
 BATTERY_REQUEST = bytes([0x01, 0x01, 0x02, 0x01])
+# vendor protocol sources: docs/SOURCES.md (olanzi / vibekey-lite / vibed)
+LINK_REQUEST = bytes([0x06, 0x03, 0x0A, 0x01])   # dongle answers: byte 4 = mic linked
+STANDBY_GET = bytes([0x01, 0x01, 0x2C, 0x01])    # reply: u32-le seconds at 4
+SLEEP_GET = bytes([0x01, 0x01, 0x42, 0x01])      # reply: u32-le seconds at 4
+MICEN_GET = bytes([0x01, 0x01, 0x2A, 0x01])      # reply: byte 4 (device mic enabled)
+ENC_GET = bytes([0x01, 0x01, 0x90, 0x01])        # reply: level@4, low u16@5, high u16@7
+POWER_READS = (STANDBY_GET, SLEEP_GET, MICEN_GET, ENC_GET)
+STANDBY_OP, SLEEP_OP, ENC_OP = 0x02, 0x02, 0x04  # write ops differ per command
+ATTENTION_INTERVAL = 5.0                         # pending-permission poll cadence
 
 # --------------------------------------------------------------------------
 # Files: config, seen controls, published state
@@ -337,6 +347,7 @@ class Config:
     def lighting(self):
         block = self.data.get("lighting")
         merged = {"mode_ring": True, "fail_blink": True, "low_battery": True,
+                  "attention_ring": True,
                   "brightness": 1.0,
                   "patterns": {"Scroll": "off", "Sessions": "heartbeat:8", "Volume": "breathe:8"}}
         if isinstance(block, dict):
@@ -426,6 +437,8 @@ class State:
             "device": None,
             "battery": None,
             "keypad": None,
+            "power": None,
+            "attention": None,
             "last": None,
             "events": 0,
             "error": "",
@@ -621,6 +634,15 @@ class OpenCode:
     def interrupt(self, session_id):
         reply = self._request("POST", "/api/session/%s/interrupt" % session_id)
         return isinstance(reply, dict)
+
+    def has_pending_permission(self, session_id):
+        """GET /api/session/{id}/permission (v2, docs/SOURCES.md) — truthy list
+        means the agent is blocked waiting for an approval. None = unreachable."""
+        reply = self._request("GET", "/api/session/%s/permission" % session_id)
+        if reply is None:
+            return None
+        items = reply.get("data") if isinstance(reply, dict) else reply
+        return bool(items)
 
 
 # --------------------------------------------------------------------------
@@ -1069,6 +1091,7 @@ RHYTHMS = {
     "tick":      (1300, [(0, 0.90), (150, 0.0)]),
     "wave":      (2400, [(0, 0.20), (320, 0.55), (640, 0.85), (960, 1.00), (1280, 0.70), (1600, 0.40), (1920, 0.15)]),
     "gallop":    (2200, [(0, 0.6), (110, 1.0), (220, 0.2), (360, 0.8), (470, 1.0), (580, 0.2), (740, 1.0), (860, 0.0)]),
+    "alarm":     (1400, [(0, 1.0), (150, 0.0), (320, 1.0), (470, 0.0), (640, 0.5), (790, 0.0)]),
 }
 
 
@@ -1088,6 +1111,7 @@ class Lighting:
         self.mode_notified = False          # once per Daemon start
         self.low_battery_latched = False
         self.get_pending = False
+        self.attention = False              # awaiting-approval ring override (spec §5.7)
         self.rhythm = None                  # (name, level, period_ms) while a host rhythm runs
         self.rhythm_tail = 0.0
 
@@ -1181,7 +1205,10 @@ class Lighting:
             self.queue = [q for q in self.queue if q[1] != "rhythm"]   # latch owns the ring until reset
             return
         label = self.daemon.current_mode_label()
-        parts = str(self.daemon.config.lighting["patterns"].get(label, "off")).split(":")
+        if self.attention:   # awaiting-approval override (spec §5.7) beats the mode pattern
+            parts = ["alarm", "12"]
+        else:
+            parts = str(self.daemon.config.lighting["patterns"].get(label, "off")).split(":")
         effect = parts[0]
         try:
             level = int(parts[1]) if len(parts) > 1 and parts[1] else 0
@@ -1250,6 +1277,14 @@ class Lighting:
         rec[0] = 1 if on else 0
         rec[4] = BLINK_LEVEL if on else 0
         return self.set_frame(MASK_TYPE | MASK_ALWAYSON, index, 0, self._with_record(index, rec))
+
+    def set_attention(self, on):
+        """Awaiting-approval override on/off (spec §5.7): re-applies the ring —
+        the `alarm` rhythm while set, the mode pattern when cleared."""
+        if on == self.attention:
+            return
+        self.attention = on
+        self.apply_ring_pattern()
 
     def low_battery(self, percent, charging):
         if not self.enabled or not self.daemon.config.lighting["low_battery"]:
@@ -1354,6 +1389,10 @@ class Daemon:
         # keypad is awake; silence means asleep/off — mic idle too)
         self.last_contact = 0.0
         self.keypad_online = None
+        self.link_queried_at = 0.0
+        self.next_power = 0.0
+        self.next_attention = 0.0
+        self.attention_sid = None
         self.running = True
         self.events = 0
         self.knob_position = 0
@@ -1700,6 +1739,7 @@ class Daemon:
 
     def handle_control(self, raw_id, label, phase):
         self.last_contact = time.monotonic()   # any event proves the keypad is awake
+        self.next_attention = 0.0              # a press may have moved the Cursor — re-check
         slot = self.slot_for(raw_id)
         preview = self.preview_active()
         entry = None
@@ -1753,8 +1793,26 @@ class Daemon:
         })
 
     def handle_vendor(self, plain):
-        self.last_contact = time.monotonic()   # any vendor answer proves the link
-        if len(plain) >= 3 and (plain[0] & 0x80):
+        cmd = plain[0] & 0x1F
+        if cmd == 0x06 and len(plain) >= 5 and (plain[1] & 0x0F) == 0x03 and plain[2] == 0x0A:
+            # the Dongle itself answers the link query — always, so this is NOT
+            # proof the mic is awake; it is the authoritative link state (docs/SOURCES.md)
+            self.link_queried_at = time.monotonic()
+            self.set_link(plain[4] == 1, "query")
+            return
+        if cmd == 0x0B and len(plain) >= 4:
+            if plain[1] == 0x0B:                        # pushed mic-link notice
+                self.set_link(bool(plain[2] & 1), "notice")
+                return
+            if plain[1] in (0x0D, 0xF0):                # standby state / mic powered on
+                self.last_contact = time.monotonic()
+                if plain[1] == 0x0D:
+                    self.set_link(not plain[2], "standby-notice")
+                else:
+                    self.set_link(True, "power-on")
+                return
+        if plain[0] & 0x80:
+            self.last_contact = time.monotonic()   # a mic-relayed reply proves it awake
             if self.allow_lighting and self.lighting.handle_reply(plain):
                 return
             if plain[1] == 0x01 and plain[2] == 0x02 and len(plain) >= 11:
@@ -1767,8 +1825,26 @@ class Daemon:
                     if self.allow_lighting:
                         self.lighting.low_battery(percent, charging)
                 return
-        if self.probe and (plain[0] & 0x1F) not in (0x06,):  # 0x06 = device heartbeats
+            if plain[1] == 0x01 and plain[2] in (0x2C, 0x42, 0x2A, 0x90) and len(plain) >= 9:
+                self.power_reply(plain)
+                return
+        if self.probe and cmd not in (0x06,):  # 0x06 = device heartbeats
             print("vendor frame:", plain[:16].hex(" "), flush=True)
+
+    def power_reply(self, plain):
+        """Standby/sleep (u32-le seconds at 4), mic-enable (byte 4) and noise-reduction
+        (level@4, low u16@5, high u16@7) replies — layouts per docs/SOURCES.md."""
+        power = dict(self.state.data.get("power") or {})
+        cid = plain[2]
+        if cid in (0x2C, 0x42):
+            power["standby_s" if cid == 0x2C else "sleep_s"] = int.from_bytes(plain[4:8], "little")
+        elif cid == 0x2A:
+            power["mic_enabled"] = plain[4] == 1
+        elif cid == 0x90:
+            power["enc"] = {"level": plain[4], "low": int.from_bytes(plain[5:7], "little"),
+                            "high": int.from_bytes(plain[7:9], "little")}
+        power["at"] = time.time()
+        self.state.set(power=power)
 
     def poll_battery(self, now):
         if not (self.allow_battery and self.config.battery):
@@ -1777,20 +1853,40 @@ class Daemon:
             return
         self.next_battery = now + BATTERY_INTERVAL
         self.device.request_battery()
+        self.device.write_vendor(vendor_frame(LINK_REQUEST))   # instant link truth
+        if self.keypad_online and now >= self.next_power:
+            self.next_power = now + 300.0                      # slow cadence; events refresh
+            for req in POWER_READS:
+                self.device.write_vendor(vendor_frame(req))
+
+    def set_link(self, online, source):
+        if online == self.keypad_online:
+            if online:
+                self.last_contact = time.monotonic()
+                if not self.state.data.get("keypad"):
+                    self.state.set(keypad={"online": True, "at": time.time(), "via": source})
+            return
+        log("keypad link:", "online" if online else "asleep or off", "(%s)" % source)
+        self.state.set(keypad={"online": online, "at": time.time(), "via": source})
+        self.keypad_online = online
+        if online:
+            self.last_contact = time.monotonic()
+            self.next_power = 0.0                              # read power info right away
 
     def poll_link(self, now):
-        """Wireless-link awareness (owner ask, 2026-11-15): the keypad answers
-        either to vendor requests or with events; nothing for LINK_STALE seconds
-        means it is asleep or switched off — the USB node stays, so PipeWire
-        cannot tell, but this can. Meaningful only while the vendor keepalive
-        runs (config battery: true); otherwise the optimistic posture stands."""
+        """Wireless-link awareness (owner ask, 2026-11-15): authoritative via the
+        Dongle's link query (`06 03 0A 01`, docs/SOURCES.md); the old silence
+        heuristic remains as fallback while no query has been answered
+        (battery:false or a firmware that never answers)."""
         if not (self.allow_battery and self.config.battery):
             return
+        if now - self.link_queried_at < BATTERY_INTERVAL * 3:
+            return                                             # query answers own the state
         online = (now - self.last_contact) <= LINK_STALE
         if online != self.keypad_online:
             self.keypad_online = online
             log("keypad link:", "asleep or off" if not online else "alive again")
-            self.state.set(keypad={"online": online, "at": time.time()})
+            self.state.set(keypad={"online": online, "at": time.time(), "via": "heuristic"})
 
     def want_mouse_passthrough(self):
         return self.knob_scroll_active() and not self.preview_active()
@@ -1810,6 +1906,58 @@ class Daemon:
             self.sync_grab()
         if self.allow_lighting:
             self.lighting.on_config(self.config)
+
+    def check_power_request(self):
+        """The Panel's consented standby/sleep/noise-reduction writes (spec §5.7):
+        a one-shot JSON file, consumed like manage_lights — the only path that
+        writes device power config. GET-after-write confirms persistence."""
+        if not self.device.connected or self.device.vendor_fd is None:
+            return
+        try:
+            if not os.path.exists(POWER_PATH):
+                return
+            req = read_json(POWER_PATH, None)
+            os.unlink(POWER_PATH)
+            if not isinstance(req, dict):
+                return
+            if "standby_s" in req:
+                v = max(0, min(86400, int(req["standby_s"])))
+                self.device.write_vendor(vendor_frame(
+                    bytes([0x01, 0x01, 0x2C, STANDBY_OP]) + v.to_bytes(4, "little")))
+            if "sleep_s" in req:
+                v = max(0, min(86400, int(req["sleep_s"])))
+                self.device.write_vendor(vendor_frame(
+                    bytes([0x01, 0x01, 0x42, SLEEP_OP]) + v.to_bytes(4, "little")))
+            if "enc" in req:
+                e = req["enc"] or {}
+                low = max(0, min(65535, int(e.get("low", 0))))
+                high = max(0, min(65535, int(e.get("high", 0))))
+                self.device.write_vendor(vendor_frame(
+                    bytes([0x01, 0x01, 0x90, ENC_OP, 1 if e.get("level") else 0])
+                    + low.to_bytes(2, "little") + high.to_bytes(2, "little")))
+            self.next_power = 0.0        # read back promptly; panel shows the truth
+        except (OSError, ValueError) as error:
+            log("power request failed:", error)
+
+    def poll_attention(self, now):
+        """Awaiting-approval ring (owner ask, spec §5.7): while the Cursor
+        Session has a pending permission request, the knob ring runs the
+        `alarm` rhythm until it resolves. Cursor-scoped v1 (the knob's
+        long-press Enter acts on that Session too); standalone TUIs stay
+        invisible (documented v1 gap). One cheap GET per ATTENTION_INTERVAL."""
+        if not (self.allow_lighting and self.config.lighting.get("attention_ring", True)):
+            return
+        if not self.device.connected or self.keypad_online is False or not self.cursor_sid:
+            return
+        if now < self.next_attention:
+            return
+        self.next_attention = now + ATTENTION_INTERVAL
+        pending = self.opencode.has_pending_permission(self.cursor_sid)
+        sid = self.cursor_sid if pending else None
+        if sid != self.attention_sid:
+            self.attention_sid = sid
+            self.state.set(attention={"sid": sid, "at": time.time()} if sid else None)
+            self.lighting.set_attention(bool(sid))
 
     def check_manage_request(self):
         """The Panel's consented Manage lights click (spec §5.5): a one-shot
@@ -1836,6 +1984,7 @@ class Daemon:
                 if self.config.reload():
                     self.apply_config_change()
                 self.check_manage_request()
+                self.check_power_request()
             if self.device.connected:
                 self.sync_grab()
                 if self.allow_lighting:
@@ -1848,6 +1997,7 @@ class Daemon:
                 continue
             self.poll_battery(now)
             self.poll_link(now)
+            self.poll_attention(now)
             try:
                 ready, _, _ = select.select(self.device.fds(), [], [], CONFIG_POLL)
             except (OSError, ValueError) as error:
