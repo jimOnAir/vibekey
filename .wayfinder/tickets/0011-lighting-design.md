@@ -2,7 +2,7 @@
 title: "Lighting design: ring, blink, battery"
 type: wayfinder:grilling
 status: open
-assignee:
+assignee: jimOnAir
 blocked-by: []
 ---
 
