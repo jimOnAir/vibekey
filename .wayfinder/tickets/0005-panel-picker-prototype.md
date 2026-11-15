@@ -45,8 +45,8 @@ window+tray, picker grouping, how "preview" is communicated.
 - **Picker = grouped-tile dialog + custom command / key-combo fields.**
 - **Tray icon + menu** for re-showing the Panel; *Preview* is a
   checkbox in the Panel, default on. Final icon: **purple drop with a white
-  `u`** (Ulanzi); earlier takes rejected — blue "VK" monogram (reads as
-  VKontakte) and the graphite knob glyph.
+  `u`, point down** (Ulanzi); earlier takes rejected — blue "VK" monogram
+  (reads as VKontakte) and the graphite knob glyph.
 - Rejected for v1: C's windowless HUD, B's reorderable mode list (mode list
   stays config-editable, header shows the current one).
 
