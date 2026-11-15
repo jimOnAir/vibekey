@@ -41,10 +41,9 @@ the Daemon brackets your hold with handy's hotkey —
   accurate tiers take seconds),
 - the Panel's tray badge watches the mic path end to end: Dongle unplugged,
   keypad asleep/off (its link drops after ~5 idle minutes — a key press wakes
-  it and clears the badge), the AU05's mic switched off on the device itself,
-  or the system input gone/muted → orange mic-with-slash. Your Dictation mic
-  is the AU05's built-in one, so the badge tracks *that keypad's* state first
-  of all.
+  it and clears the badge), or the system input gone/muted → orange
+  mic-with-slash. Your Dictation mic is the AU05's built-in one, so the badge
+  tracks *that keypad's* state first of all.
 
 Recommended handy settings, all graded by the handy card: push to talk,
 always-on microphone, overlay off, typing tool `xdotool`, a fast model tier on

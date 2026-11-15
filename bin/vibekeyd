@@ -213,9 +213,11 @@ BATTERY_REQUEST = bytes([0x01, 0x01, 0x02, 0x01])
 LINK_REQUEST = bytes([0x06, 0x03, 0x0A, 0x01])   # dongle answers: byte 4 = mic linked
 STANDBY_GET = bytes([0x01, 0x01, 0x2C, 0x01])    # reply: u32-le seconds at 4
 SLEEP_GET = bytes([0x01, 0x01, 0x42, 0x01])      # reply: u32-le seconds at 4
-MICEN_GET = bytes([0x01, 0x01, 0x2A, 0x01])      # reply: byte 4 (device mic enabled)
 ENC_GET = bytes([0x01, 0x01, 0x90, 0x01])        # reply: level@4, low u16@5, high u16@7
-POWER_READS = (STANDBY_GET, SLEEP_GET, MICEN_GET, ENC_GET)
+POWER_READS = (STANDBY_GET, SLEEP_GET, ENC_GET)
+# NOTE: mic-enable GET `01 01 2A 01` is deliberately NOT polled — field-tested
+# 2026-11-15 on fw 4.4.2: it reads 0 while the mic empirically streams audio,
+# and SET [0|1] does not stick. A dead flag must not drive UI (docs/SOURCES.md).
 STANDBY_OP, SLEEP_OP, ENC_OP = 0x02, 0x02, 0x04  # write ops differ per command
 ATTENTION_INTERVAL = 5.0                         # pending-permission poll cadence
 
@@ -1825,21 +1827,19 @@ class Daemon:
                     if self.allow_lighting:
                         self.lighting.low_battery(percent, charging)
                 return
-            if plain[1] == 0x01 and plain[2] in (0x2C, 0x42, 0x2A, 0x90) and len(plain) >= 9:
+            if plain[1] == 0x01 and plain[2] in (0x2C, 0x42, 0x90) and len(plain) >= 9:
                 self.power_reply(plain)
                 return
         if self.probe and cmd not in (0x06,):  # 0x06 = device heartbeats
             print("vendor frame:", plain[:16].hex(" "), flush=True)
 
     def power_reply(self, plain):
-        """Standby/sleep (u32-le seconds at 4), mic-enable (byte 4) and noise-reduction
-        (level@4, low u16@5, high u16@7) replies — layouts per docs/SOURCES.md."""
+        """Standby/sleep (u32-le seconds at 4) and noise-reduction (level@4, low
+        u16@5, high u16@7) replies — layouts per docs/SOURCES.md."""
         power = dict(self.state.data.get("power") or {})
         cid = plain[2]
         if cid in (0x2C, 0x42):
             power["standby_s" if cid == 0x2C else "sleep_s"] = int.from_bytes(plain[4:8], "little")
-        elif cid == 0x2A:
-            power["mic_enabled"] = plain[4] == 1
         elif cid == 0x90:
             power["enc"] = {"level": plain[4], "low": int.from_bytes(plain[5:7], "little"),
                             "high": int.from_bytes(plain[7:9], "little")}
@@ -1920,9 +1920,6 @@ class Daemon:
             os.unlink(POWER_PATH)
             if not isinstance(req, dict):
                 return
-            if "mic_enable" in req:
-                self.device.write_vendor(vendor_frame(
-                    bytes([0x01, 0x01, 0x2A, 0x00, 1 if req["mic_enable"] else 0])))
             if "standby_s" in req:
                 v = max(0, min(86400, int(req["standby_s"])))
                 self.device.write_vendor(vendor_frame(

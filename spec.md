@@ -112,7 +112,7 @@ Config dir `~/.config/vibekey/`, runtime dir `$XDG_RUNTIME_DIR/vibekey/`:
 | `config.json` | only via `vibekey-config` (atomic replace) | Daemon (0.5 s mtime poll + SIGHUP), Panel | schema §4 |
 | `seen.json` | Daemon (per press) | Panel | learned raw ids for Alias UX |
 | `actions.json` (catalogue) | package (`/usr/lib/vibekey/actions.json`) | Daemon (seed + behavior-presets), Panel (picker) | resolved relative to the package dir, **not** `bin/`-relative — a wrong path silently no-ops first-run seeding (risk R6) |
-| `state.json` | Daemon only, rewritten in place on every event | Panel (`QFileSystemWatcher` + 1 s/5 s poll) | fields: upstream set (`version,pid,connected,access,grabbed,mouse_passthrough,preview,knob_position,device,battery,last,events,error,updated`) **plus** `knob_mode` (§5.3), `last_error` (§5.3 failure surface), `keypad` (`online`, `at` — wireless-link state, §5.6), `power` (`standby_s`, `sleep_s`, `mic_enabled`, `enc` — device telemetry, §5.7), `attention` (`sid` while an agent awaits approval, else `null`, §5.7) and `lighting` incl. `device_mode`: `0|1|2|"unknown"|"disabled"`, `pending_mode`, `last_error` (§5.5) |
+| `state.json` | Daemon only, rewritten in place on every event | Panel (`QFileSystemWatcher` + 1 s/5 s poll) | fields: upstream set (`version,pid,connected,access,grabbed,mouse_passthrough,preview,knob_position,device,battery,last,events,error,updated`) **plus** `knob_mode` (§5.3), `last_error` (§5.3 failure surface), `keypad` (`online`, `at` — wireless-link state, §5.6), `power` (`standby_s`, `sleep_s`, `enc` — device telemetry, §5.7), `attention` (`sid` while an agent awaits approval, else `null`, §5.7) and `lighting` incl. `device_mode`: `0|1|2|"unknown"|"disabled"`, `pending_mode`, `last_error` (§5.5) |
 | `preview` | Panel (`open` every 2 s while shown, `closed` on hide) | Daemon (trusts `open` for 6 s) | while active: events are reported, nothing runs |
 | `manage_lights` | Panel (one-shot `"manage"`) | Daemon (consumes + unlinks on its 0.5 s poll) | the consented Manage lights request (§5.5) — the Panel never touches the vendor channel |
 | `power` | Panel (one-shot JSON: `standby_s`/`sleep_s`/`enc`) | Daemon (consumes) | consented device power & noise-reduction writes (§5.7); every write is read back |
@@ -433,8 +433,7 @@ silence while the node is up). The Daemon owns the truth, **authoritatively**:
 
 The Panel's tray mic badge and handy card consume it: **badge = the AU05's
 Dictation mic is unusable now** — Dongle gone (`connected: false`), keypad
-asleep/off (`keypad.online: false`), mic disabled on the device
-(`power.mic_enabled: false`), or the audio stack is broken (missing/muted —
+asleep/off (`keypad.online: false`), or the audio stack is broken (missing/muted —
 the only pactl-sourced case). The keypad cannot be woken from the host
 (writes into sleep are dropped, §5.4) — the badge says press a key, which is
 itself the proof of life.
@@ -445,10 +444,11 @@ Three vendor-channel features with layouts per [docs/SOURCES.md](docs/SOURCES.md
 (vibed captured on 4.4.0, vibekey-lite device-observed reads):
 
 - **Telemetry** (`state.json: power`): standby delay GET `01 01 2C 01`, sleep
-  delay GET `01 01 42 01` (u32-le seconds at payload offset 4), mic enable
-  GET `01 01 2A 01` (byte 4), noise reduction GET `01 01 90 01` (level@4,
-  low u16@5, high u16@7). Read on link-up and every 5 min; skipped while the
-  keypad is offline (those frames would die in the radio dark).
+  delay GET `01 01 42 01` (u32-le seconds at payload offset 4), noise reduction
+  GET `01 01 90 01` (level@4, low u16@5, high u16@7). Read on link-up and
+  every 5 min; skipped while the keypad is offline (those frames would die in
+  the radio dark). The mic-enable field `01 01 2A` is NOT used — field-tested
+  meaningless on 4.4.2 (see docs/SOURCES.md).
 - **Consented writes** (the `power` one-shot file, manage_lights pattern):
   SET ops are `01 01 2C 02` / `01 01 42 02` (+u32-le) and `01 01 90 04`
   (+level, low, high) — note the differing op bytes. The Panel's

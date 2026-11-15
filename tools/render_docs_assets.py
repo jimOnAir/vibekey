@@ -55,7 +55,7 @@ def demo_state(tmp):
         "battery": {"percent": 87, "charging": False, "voltage_mv": 4010, "at": 0},
         "events": 128, "error": "", "updated": "x1",
         "keypad": {"online": True, "at": 0, "via": "query"},
-        "power": {"standby_s": 300, "sleep_s": 3600, "mic_enabled": True,
+        "power": {"standby_s": 300, "sleep_s": 3600,
                   "enc": {"level": 1, "low": 1600, "high": 1000}, "at": 0},
         "attention": None,
         "lighting": {"device_mode": 2, "last_error": "",

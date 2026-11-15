@@ -27,10 +27,15 @@ cite the source line in the commit message.
 | `01 01 42 01`/`02` sleep delay GET/SET | vibekey-lite read + vibed SET | **deployed** — Panel setting |
 | `01 01 90 01`/`04` mic noise reduction GET/SET | olanzi read + vibed SET | **deployed** — Panel slider; readback-verified on 4.4.0 |
 | `01 01 0D 01` standby state GET | vibekey-lite | deployed as state telemetry |
-| `01 01 2A 01` mic enable GET | vibed | deployed as state telemetry |
 
 ## Commands deliberately NOT used
 
+- `01 01 2A` mic enable: **field-tested dead on our unit (fw 4.4.2,
+  2026-11-15)** — reads 0 while the mic empirically streams audio (capture:
+  62500/64000 non-zero samples with the keypad online), and SET [0|1] does not
+  stick. The Panel initially surfaced it as "mic DISABLED on device"; that
+  badge was a false positive and was removed. Lesson kept: a flag we cannot
+  correlate with ground truth must not drive UI.
 - `06 01 23 00 01` heartbeat + `01 01 10 00 03` host-online: flips keys from
   standard HID into vendor notices — our Daemon consumes standard HID and
   would have to re-implement every binding in the host. We stay invisible.

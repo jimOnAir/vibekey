@@ -131,8 +131,6 @@ def mic_badge(state, stack_state):
         return True, "AU05 not connected — Dictation mic offline"
     if (state.get("keypad") or {}).get("online") is False:
         return True, "AU05 asleep or switched off — press a key to wake it"
-    if (state.get("power") or {}).get("mic_enabled") is False:
-        return True, "microphone disabled on the keypad itself"
     if stack_state == "missing":
         return True, "microphone not connected"
     if stack_state == "muted":
@@ -1000,12 +998,6 @@ class PanelWindow(QMainWindow):
         self.power_line = QLabel()
         self.power_line.setWordWrap(True)
         lay.addWidget(self.power_line)
-        self.mic_btn = QPushButton("Enable the mic on the AU05")
-        self.mic_btn.setToolTip("Writes mic-enable into the device (consented) — for when the "
-                                "keypad reports its microphone switched off")
-        self.mic_btn.clicked.connect(lambda: self._power_write({"mic_enable": 1}))
-        self.mic_btn.hide()
-        lay.addWidget(self.mic_btn)
         row = QHBoxLayout()
         row.addWidget(QLabel("Standby"))
         self.standby_cb = QComboBox()
@@ -1056,7 +1048,6 @@ class PanelWindow(QMainWindow):
             self.power_line.setText("· power info: not read yet (needs the keypad awake — "
                                     "press a key)")
             self.power_apply.setEnabled(False)
-            self.mic_btn.hide()
             return
         self.power_apply.setEnabled(True)
         self._select_cb(self.standby_cb, power.get("standby_s"))
@@ -1073,9 +1064,6 @@ class PanelWindow(QMainWindow):
             bits.append("standby %d min" % (power["standby_s"] // 60))
         if power.get("sleep_s") is not None:
             bits.append("sleep %s" % ("never" if power["sleep_s"] == 0 else "%d min" % (power["sleep_s"] // 60)))
-        self.mic_btn.setVisible(power.get("mic_enabled") is False)
-        if power.get("mic_enabled") is False:
-            bits.append("<span style='color:#c0392b'><b>mic DISABLED on device</b></span>")
         self.power_line.setText("· device: " + " · ".join(bits) if bits
                                 else "· device: reading pending…")
 
