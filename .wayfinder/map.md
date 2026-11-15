@@ -42,6 +42,8 @@ sessions; nothing on this map builds it.
 
 <!-- one line per closed ticket: name + gist + link -->
 
+- [Assemble the buildable spec](tickets/0009-assemble-buildable-spec.md): **`spec.md` at the repo root — the destination** — architecture, file protocol, config schema (+`behavior` presets), full preset table and `defaults`, Variant-A Panel surface, packaging/install/uninstall, and a 16-item implementation verification checklist. Complete except one flagged subsection (§5.5 device lighting-mode ownership) carried to new ticket [0012](tickets/0012-lighting-device-mode-ownership.md).
+
 - [Lighting design: ring, blink, battery](tickets/0011-lighting-design.md): Ring = Knob-mode indicator (`Scroll:off`, `Sessions:solid:8`, `Volume:breathe:8`, custom→off); failure = 3 fast blinks **on the culprit's keycap** (fire-time only — the standby gotcha can't bite); ≤10% battery → ring `breathe:6` + one notify, hysteresis at 20%; Panel = 3 switches + brightness slider only; `"lighting"` config block accepted; single-writer module confirmed as architecture.
 - [Packaging & install spec](tickets/0008-packaging-install-spec.md): single `vibekey` package — `depends=(python pyside6 xdotool wmctrl libnotify)`, `handy`/`orca` as optdepends; package-owned **static `MODE=0660 GROUP=vibekey` udev rule** + `sysusers.d`, the one `gpasswd -a` step detected-and-taught by the app; user unit enabled via README or first-run Panel button (`After=graphical-session.target`); Panel **"Launch at login" checkbox** → XDG autostart; own 0.1.0 versioning pinning upstream; user state survives uninstall.
 - [Backlight control: keycap LEDs + knob ring](tickets/0010-backlight-control.md): **feasible today — fully documented** (TEA `0x55` SET commands, 4 MONOCHROME channels: 3 keycaps + knob ring; mode/effect/brightness 0–20, **no colour**, persisted device-side). Write path proven by upstream's own battery writes under Grab; gotchas catalogued (64-byte frames, all-4-records, stale readback → trust `0x14` ack, writes dropped in standby). Cost: shared `lighting` module ~1 day; ring-as-mode-indicator ½ day; blink runner +1 day; battery blink XS. Findings on `research/backlight-control`.
@@ -55,6 +57,10 @@ sessions; nothing on this map builds it.
 
 ## Not yet specified
 
+- **Lighting device-mode ownership** — open ticket
+  [0012](tickets/0012-lighting-device-mode-ownership.md) (grilling): who owns
+  the device-global lighting mode (off/all-on/work) and what vibekeyd does when
+  it doesn't hold it; the only `spec.md` subsection not yet buildable (§5.5).
 - **Firmware-variant confirmation on this actual Dongle** — the port audit
   verified this Dongle's node topology (`hidraw12` + vendor channel + 3 event
   nodes) matches the daemon's assumptions; still open: which knob-turn/press
