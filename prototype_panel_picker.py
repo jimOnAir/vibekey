@@ -240,7 +240,7 @@ class KeypadWidget(QFrame):
                 "QPushButton{background:transparent;border:none}"
                 "QPushButton:pressed{background:rgba(61,132,246,150);border-radius:%dpx}" % r)
             if fn:
-                px = int(r * 1.1)
+                px = int(r * 1.1667)  # 28 px: 28-unit grid lands on pixel edges
                 b.setIcon(line_icon(fn, px))
                 b.setIconSize(QSize(px, px))
             b.setGeometry(cx - r, cy - r, 2 * r, 2 * r)
@@ -575,12 +575,12 @@ def _arcs(p, s, color, r=10.4, rot=0.0):
 
 
 def draw_mic(p, s, color):
-    """mic cap: AU05 engraving — slim capsule, shallow smile-yoke low on the
-    capsule, short tail, light stroke; no foot. Draws larger within the 28
-    grid than the other glyphs (owner: mic reads small otherwise)."""
+    """mic cap: AU05 engraving — wide capsule (w=6.0), shallow smile-yoke low
+    on the capsule, short tail, light stroke; no foot. At icon px=28 the 28
+    unit grid is pixel-aligned: head and bottom centroids measure equal."""
     k = s / 28.0
     p.setPen(_pen(color, 1.9 * k)); p.setBrush(Qt.NoBrush)
-    p.drawRoundedRect(11.7 * k, 4.7 * k, 4.7 * k, 11.0 * k, 2.4 * k, 2.4 * k)
+    p.drawRoundedRect(11.0 * k, 4.7 * k, 6.0 * k, 11.0 * k, 3.0 * k, 3.0 * k)
     path = QPainterPath(); path.moveTo(9.5 * k, 13.7 * k)
     path.cubicTo(9.5 * k, 20.0 * k, 18.5 * k, 20.0 * k, 18.5 * k, 13.7 * k)
     p.drawPath(path)
