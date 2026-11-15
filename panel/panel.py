@@ -15,12 +15,12 @@ import subprocess
 import sys
 import time
 
-from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, QSize
+from PySide6.QtCore import Qt, QFileSystemWatcher, QTimer, QPointF, QRectF, QSize
 from PySide6.QtGui import (QAction, QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap,
                            QRadialGradient)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
-    QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QPushButton, QSlider,
+    QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QPlainTextEdit, QPushButton, QSlider,
     QStatusBar, QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
@@ -461,10 +461,14 @@ class PanelWindow(QMainWindow):
         self.status_line = QLabel("waiting for the Daemon…")
         self.statusBar().addWidget(self.status_line, 1)
 
-        # state.json: watcher + poll (spec §3 — keep the upstream cadence)
+        # state.json: watcher + 1 s poll (spec §3 — the Daemon rewrites in place,
+        # same inode, so the watch survives; the poll covers a replaced file)
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self.poll_state)
         self.poll_timer.start(1000)
+        self.watcher = QFileSystemWatcher(self)
+        self.watcher.fileChanged.connect(lambda _p: self.poll_state())
+        self._watch_state()
         self.poll_state(force=True)
 
         # preview heartbeat while shown (spec §3)
@@ -502,6 +506,13 @@ class PanelWindow(QMainWindow):
 
     # ---- state / config polling -------------------------------------------------
 
+    def _watch_state(self):
+        try:
+            if os.path.exists(STATE_PATH) and STATE_PATH not in self.watcher.files():
+                self.watcher.addPath(STATE_PATH)
+        except (RuntimeError, OSError):
+            pass
+
     def poll_state(self, force=False):
         data = read_json(STATE_PATH, None)
         if isinstance(data, dict):
@@ -509,6 +520,7 @@ class PanelWindow(QMainWindow):
             self.state = data
             if changed:
                 self.refresh()
+        self._watch_state()
 
     def refresh(self):
         st = self.state
@@ -572,8 +584,9 @@ class PanelWindow(QMainWindow):
             detail = self.assignment_for(SLOT_OF.get(zone))
         self.set_status("%s → %s   [RAN (sim)]" % (caption, detail))
 
-    def edit_assignment(self, zone):
-        slot = SLOT_OF.get(zone)
+    def edit_assignment(self, zone_or_slot):
+        # accepts a drawing zone ("confirm") or a slot name ("key2")
+        slot = SLOT_OF.get(zone_or_slot) or (zone_or_slot if zone_or_slot in dict(EDITABLE_SLOTS) else None)
         if not slot:
             return
         dlg = PickerDialog(dict(EDITABLE_SLOTS).get(slot, slot),
@@ -615,8 +628,26 @@ class PanelWindow(QMainWindow):
         self.handy_fix.clicked.connect(self.fix_handy)
         self.handy_fix.hide()
         lay.addWidget(self.handy_fix)
+        snippet = QPlainTextEdit()
+        snippet.setReadOnly(True)
+        snippet.setFixedHeight(110)
+        snippet.setPlainText(
+            "handy Settings → recommended for vibekey:\n"
+            "  push to talk · Parakeet TDT v3 (Q8 ≈1.3 GB, fast CPU) ·\n"
+            "  Canary 180M (smaller) · whisper-* (accurate, slower) ·\n"
+            "  always_on_microphone ON · overlay OFF · Typing Tool: xdotool")
+        lay.addWidget(snippet)
         self.handy_box = box
         return box
+
+    @staticmethod
+    def _chord_of(bindings):
+        """handy stores bindings.transcribe as an object with current_binding
+        (handy settings.rs:1712) — tolerate the plain-string shape too."""
+        t = (bindings or {}).get("transcribe")
+        if isinstance(t, dict):
+            return t.get("current_binding")
+        return t if isinstance(t, str) else None
 
     def handy_store(self):
         data = read_json(HANDY_STORE, None)
@@ -638,7 +669,7 @@ class PanelWindow(QMainWindow):
             lab.setText("%s %s" % (mark, tip))
         chord = ((self.config.get("buttons") or {}).get("key1") or {}).get("keys") or "ctrl+alt+space"
         bindings = store.get("bindings") or {}
-        handy_chord = bindings.get("transcribe")
+        handy_chord = self._chord_of(bindings)
         if handy_chord and handy_chord != chord:
             self.handy_chord.setText("<span style='color:#c0392b'>handy's chord is %r but the "
                                      "Dictation Preset uses %r</span>" % (handy_chord, chord))
@@ -654,7 +685,12 @@ class PanelWindow(QMainWindow):
             self.set_status("handy's settings_store.json not found — nothing to fix")
             return
         bindings = store.get("bindings") or {}
-        bindings["transcribe"] = chord
+        transcribe = bindings.get("transcribe")
+        if isinstance(transcribe, dict):
+            transcribe["current_binding"] = chord
+        else:
+            transcribe = chord
+        bindings["transcribe"] = transcribe
         store["bindings"] = bindings
         tmp = HANDY_STORE + ".vibekey.tmp"
         try:
@@ -712,15 +748,19 @@ class PanelWindow(QMainWindow):
         if device_mode in (0, 1):
             label = "Always Off" if device_mode == 0 else "Always On"
             self.device_mode_line.setText("Device lighting mode: %s — vibekeyd's lighting is idle." % label)
+            self.device_mode_line.show()
             self.manage_btn.show()
         elif device_mode == "unknown":
-            self.device_mode_line.setText("Device lighting mode: unknown (asleep?) — lighting stays live.")
+            # spec §5.5: optimistic — while unknown the Panel shows no line, no button
+            self.device_mode_line.hide()
             self.manage_btn.hide()
         elif device_mode == "disabled":
             self.device_mode_line.setText("Lighting off — vibekeyd sends the device no lighting traffic.")
+            self.device_mode_line.show()
             self.manage_btn.hide()
         else:
             self.device_mode_line.setText("Device lighting mode: Working.")
+            self.device_mode_line.show()
             self.manage_btn.hide()
 
     def save_lighting(self):
@@ -788,8 +828,8 @@ class TrayApp:
         self.window = PanelWindow(self)
         tray = QSystemTrayIcon(icon, app)
         menu = QMenu()
-        act_show = QAction("Show vibekey", menu)
-        act_show.triggered.connect(self.show_window)
+        act_show = QAction("Show/Hide vibekey Panel", menu)
+        act_show.triggered.connect(self.toggle_window)
         menu.addAction(act_show)
         act_quit = QAction("Quit", menu)
         act_quit.triggered.connect(app.quit)
@@ -812,6 +852,19 @@ class TrayApp:
             return
         problem = bool(state.get("error")) or state.get("access") == "denied" or bool(state.get("last_error"))
         tray.setIcon(self.build_icon(problem))
+        mode = (state.get("knob_mode") or {}).get("label")
+        tip = "vibekey — AU05 control surface"
+        if mode:
+            tip += " · Knob mode: %s" % mode
+        if problem:
+            tip += " · see the Panel (attention badge)"
+        tray.setToolTip(tip)
+
+    def toggle_window(self):
+        if self.window.isVisible():
+            self.window.hide()
+        else:
+            self.show_window()
 
     def show_window(self):
         self.window.show()

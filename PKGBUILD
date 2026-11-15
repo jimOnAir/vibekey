@@ -50,8 +50,9 @@ EOF
 }
 
 _retrigger_dongle() {
-  # ported verbatim from upstream vibekey-install-access:28-37 (spec §9):
-  # apply the new rule to the attached Dongle without waiting for its watchdog
+  # ported from upstream vibekey-install-access:28-37 (spec §9): reload rules,
+  # then apply them to the attached Dongle without waiting for its watchdog
+  udevadm control --reload
   udevadm trigger --subsystem-match=input --attr-match=idVendor=fff1 2>/dev/null || true
   udevadm trigger --subsystem-match=hidraw --attr-match=idVendor=fff1 2>/dev/null || true
   for dev in /sys/bus/usb/devices/*; do

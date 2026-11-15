@@ -24,7 +24,33 @@ The map and its decision tickets stay as the provenance record.
 
 ## Credits
 
-- Daemon design and protocol work: [jimmibram/vibekey-driver](https://github.com/jimmibram/vibekey-driver), MIT — see [LICENSE](LICENSE)
+- Daemon design and protocol work: [jimmibram/vibekey-driver](https://github.com/jimmibram/vibekey-driver), MIT — see [LICENSE](LICENSE); pinned commit in `UPSTREAM`
 - AU05 protocol documentation: [MrCroxx/olanzi](https://github.com/MrCroxx/olanzi), [kubja/ulanzi-vibekey](https://github.com/kubja/ulanzi-vibekey)
 
 Not affiliated with Ulanzi.
+
+## Install (spec §9)
+
+```bash
+makepkg -si                      # builds + installs the vibekey package
+gpasswd -a $USER vibekey         # the ONE manual step; then re-login
+systemctl --user enable --now vibekeyd
+```
+
+`xdotool wmctrl libnotify python pyside6` come in as deps; **handy 0.10.1** (the
+audited release — AUR `handy`) and `orca` are optdepends: install handy for the
+Dictation Preset, and follow the Panel's **handy card** (tauri backend,
+push_to_talk, always-on mic, overlay off). The Panel can also enable the unit
+for you on first run (its button) and offers **Launch at login**.
+
+## Uninstall / teardown (spec §9)
+
+`pacman -Rns vibekey` removes what the package owns; user state survives by
+design (config, autostart, group membership, unit). Full teardown:
+
+```bash
+systemctl --user disable --now vibekeyd
+gpasswd -d $USER vibekey
+rm ~/.config/autostart/vibekey-panel.desktop
+rm -rf ~/.config/vibekey
+```

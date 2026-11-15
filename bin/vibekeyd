@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""vibekeyd: Ulanzi Vibekey (AU05) driver for Manjaro KDE (X11) — vibekey port.
+"""vibekeyd: Ulanzi Vibekey (AU05) control-surface daemon for Manjaro KDE (X11) — vibekey port.
 
 Ported from jimmibram/vibekey-driver (MIT, upstream @ 41ba904b); buildable
 spec: spec.md at the repo root. What it does
@@ -321,6 +321,9 @@ class Config:
     def battery(self):
         return self.data.get("battery", True) is not False
 
+    # NOTE: "grab" is seeded and preserved but never read — upstream semantics
+    # exactly (only the unit/CLI flags toggle the Grab; spec §4 keeps that).
+
     @property
     def knob_modes(self):
         modes = self.data.get("knob_modes")
@@ -342,7 +345,9 @@ class Config:
             except (TypeError, ValueError):
                 pass
             if isinstance(block.get("patterns"), dict):
-                merged["patterns"].update({k: str(v) for k, v in block["patterns"].items()})
+                # a user-authored patterns block replaces the defaults:
+                # a mode with no entry → off (spec §4)
+                merged["patterns"] = {k: str(v) for k, v in block["patterns"].items()}
         return merged
 
     @property
@@ -507,7 +512,7 @@ def spawn(argv, shell=False):
         return False
 
 
-def reap_children():
+def reap_children(report=None):
     still = []
     for proc, argv in _children:
         code = proc.poll()
@@ -515,6 +520,8 @@ def reap_children():
             still.append((proc, argv))
         elif code != 0:
             log("command failed (exit %d):" % code, argv)
+            if report is not None:
+                report("Command failed (exit %d): %s" % (code, argv))
     _children[:] = still
 
 
@@ -633,7 +640,7 @@ class Orca:
         return None
 
     def running(self):
-        reply = self._run(["status", "--json"])
+        reply = self._run(["status"])     # _run appends --json
         return bool(reply)
 
     def _run(self, args, timeout=5.0):
@@ -816,10 +823,11 @@ class Vibekey:
         return self.hid_fd is not None
 
     def open(self, grab):
-        """Returns 'ok', 'absent' or 'denied'."""
+        """Returns 'ok', 'absent', 'denied' or 'unexpected' (interface layout
+        changed — spec §1 R5 fail-loud)."""
         hidraw = find_hidraw_nodes()
         if "input2" not in hidraw:
-            return "absent"
+            return "unexpected" if hidraw else "absent"
         try:
             self.hid_fd = os.open(hidraw["input2"], os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
         except PermissionError:
@@ -1100,15 +1108,15 @@ class Lighting:
 
     @staticmethod
     def set_frame(mask, led_index, value, records):
-        """SET frame. Non-mode masks carry their values inside the four records
-        — which always all travel (a zeroed slot would clear that light);
-        mask MODE (0x01) puts its value at frame[6]."""
-        if mask == MASK_MODE:
-            frame = [0x01, 0x0B, 0x88, 0x04, mask, 0x00, value & 0xFF, 0x00]
-        else:
-            frame = [0x01, 0x0B, 0x88, 0x04, mask, led_index, 0x00, 0x00]
-            for rec in records[:4]:
-                frame.extend(int(v) & 0xFF for v in rec)
+        """SET frame. All four 5-byte records always travel (a zeroed slot
+        would clear another light — read-modify-write, spec §5.5); mask MODE
+        (0x01) carries its value at frame[6], record masks read their fields
+        from the record at 8 + 5·ledIndex."""
+        frame = [0x01, 0x0B, 0x88, 0x04, mask & 0xFF,
+                 (led_index if mask != MASK_MODE else 0) & 0xFF,
+                 value & 0xFF, 0x00]
+        for rec in records[:4]:
+            frame.extend(int(v) & 0xFF for v in rec)
         return bytes(frame)
 
     def _set_record(self, index, mask, rec_type=None, breathe=None, alwayson=None):
@@ -1124,30 +1132,31 @@ class Lighting:
         self.records[index] = rec
         self._enqueue(self.set_frame(mask, index, 0, self.records), "set", (index, mask))
 
-    def _enqueue(self, frame, kind, meta):
+    def _enqueue(self, frame, kind, meta, not_before=0.0):
         if self.device_mode == "disabled":
             return
         if self.device_mode in (0, 1) and kind != "mode":
             return          # policies idle while the Device lighting mode is not Working
-        self.queue.append((vendor_frame(frame), kind, meta))
+        self.queue.append((vendor_frame(frame), kind, meta, float(not_before)))
 
     def request_get(self):
-        if self.get_pending or self.outstanding:
+        if self.device_mode == "disabled" or self.get_pending or self.outstanding:
             return
-        self.queue.insert(0, (vendor_frame(LIGHTING_GET), "get", None))
+        self.queue.insert(0, (vendor_frame(LIGHTING_GET), "get", None, 0.0))
         self.get_pending = True
 
     def write_mode_working(self, consented=True):
         """Manage lights (spec §5.5): the ONLY way vibekeyd writes mask 0x01."""
         if not consented:
             return False
-        self._enqueue(bytes([0x01, 0x0B, 0x88, 0x04, MASK_MODE, 0x00, MODE_WORK, 0x00]) + bytes(32),
-                      "mode", None)
+        self._enqueue(self.set_frame(MASK_MODE, 0, MODE_WORK, self.records), "mode", None)
         return True
 
     def apply_ring_pattern(self):
         if not self.enabled or not self.daemon.config.lighting["mode_ring"]:
             return
+        if self.low_battery_latched and self.daemon.config.lighting["low_battery"]:
+            return   # the low-battery breathe owns the ring while it lasts (spec §5.4)
         label = self.daemon.current_mode_label()
         pattern = self.daemon.config.lighting["patterns"].get(label, "off")
         effect, _, level = str(pattern).partition(":")
@@ -1171,24 +1180,26 @@ class Lighting:
         if index is None:
             return
         restore = list(self.records[index])
+        base = time.monotonic() + 0.05
         for step in range(3):
-            self._enqueue_blink(index, 1)          # on at BLINK_LEVEL
-            self._enqueue_blink(index, 0)          # off
+            when = base + step * 2 * BLINK_PAIR_MS / 1000.0
+            self._enqueue(self._blink_frame(index, restore, on=True), "set", (index, "blink"), when)
+            self._enqueue(self._blink_frame(index, restore, on=False), "set", (index, "blink"),
+                          when + BLINK_PAIR_MS / 1000.0)
         # restore the owner record after the blinks
-        self.records[index] = restore
-        self._enqueue(self.set_frame(MASK_TYPE | MASK_ALWAYSON | MASK_BREATHE, index, 0, self.records),
-                      "set", (index, "restore"))
+        self._enqueue(self.set_frame(MASK_TYPE | MASK_ALWAYSON | MASK_BREATHE, index, 0,
+                                     self._with_record(index, restore)),
+                      "set", (index, "restore"),
+                      base + 3 * 2 * BLINK_PAIR_MS / 1000.0)
 
-    def _enqueue_blink(self, index, on):
-        if self.device_mode == "disabled" or self.device_mode in (0, 1):
-            return
-        saved = list(self.records[index])
-        rec = list(saved)
+    def _with_record(self, index, rec):
+        return [list(r) if i != index else list(rec) for i, r in enumerate(self.records[:4])]
+
+    def _blink_frame(self, index, owner, on):
+        rec = list(owner)
         rec[0] = 1 if on else 0
         rec[4] = BLINK_LEVEL if on else 0
-        self.records[index] = rec
-        self._enqueue(self.set_frame(MASK_TYPE | MASK_ALWAYSON, index, 0, self.records), "set", (index, "blink"))
-        self.records[index] = saved
+        return self.set_frame(MASK_TYPE | MASK_ALWAYSON, index, 0, self._with_record(index, rec))
 
     def low_battery(self, percent, charging):
         if not self.enabled or not self.daemon.config.lighting["low_battery"]:
@@ -1208,17 +1219,21 @@ class Lighting:
         if not self.enabled or not self.daemon.device.connected:
             return
         if self.outstanding and now > self.outstanding[3]:
-            frame, kind, meta, _ = self.outstanding
+            _frame, kind, _meta, _deadline = self.outstanding
             self.outstanding = None
             if kind == "get":
                 self.get_pending = False
                 # unanswered GET is normal while the keypad sleeps (spec §5.5 optimistic)
             elif kind == "mode":
-                self.daemon.state.set_lighting(last_error="No answer from the device — press any key on the AU05, then try again.")
+                self.daemon.state.set_lighting(pending_mode=False,
+                                               last_error="No answer from the device — press any key on the AU05, then try again.")
             log("lighting write timed out:", kind)
         if self.outstanding or not self.queue:
             return
-        frame, kind, meta = self.queue.pop(0)
+        frame, kind, meta, not_before = self.queue[0]
+        if not_before > now:
+            return                     # blink pacing: the queue waits, never the loop
+        self.queue.pop(0)
         if not self.daemon.device.write_vendor(frame):
             return
         self.outstanding = (frame, kind, meta, now + ACK_DEADLINE)
@@ -1235,7 +1250,8 @@ class Lighting:
         self.get_pending = False
         if kind == "mode":
             self.device_mode = MODE_WORK
-            self.daemon.state.set_lighting(device_mode=MODE_WORK, pending_mode=False, last_error="")
+            self.daemon.state.set_lighting(device_mode=MODE_WORK, pending_mode=False,
+                                           last_error="", channels=[list(r) for r in self.records])
             self.apply_ring_pattern()
             log("device lighting mode set to Working (Manage lights)")
             return True
@@ -1244,7 +1260,8 @@ class Lighting:
             self.mode_bright = plain[7]
             for i in range(4):
                 self.records[i] = list(plain[8 + 5 * i:13 + 5 * i])
-            self.daemon.state.set_lighting(device_mode=self.device_mode, last_error="")
+            self.daemon.state.set_lighting(device_mode=self.device_mode, last_error="",
+                                           channels=[list(r) for r in self.records])
             self.apply_ring_pattern()
             if self.device_mode in (0, 1) and not self.mode_notified:
                 self.mode_notified = True
@@ -1254,7 +1271,7 @@ class Lighting:
                                   'vibekeyd manage lights.' % label)
             return True
         # SET ack: we trust the ack (ring readback is verifiably stale — spec §5.5)
-        self.daemon.state.set_lighting(last_error="")
+        self.daemon.state.set_lighting(last_error="", channels=[list(r) for r in self.records])
         return True
 
 
@@ -1373,6 +1390,9 @@ class Daemon:
             if access == "denied":
                 hint = ("No permission to read the Dongle — add this user to the "
                         "vibekey group: gpasswd -a $USER vibekey (then re-login).")
+            elif access == "unexpected":
+                hint = ("Dongle present but the expected /input2 report interface is missing — "
+                        "firmware variant? Run vibekeyd --probe and check spec §1 R5.")
             self.state.set(connected=False, access=access, grabbed=False, device=None, error=hint)
             return False
         log("connected:", ", ".join(self.device.names) or "hidraw only",
@@ -1415,14 +1435,14 @@ class Daemon:
         if phase == "press":
             if not self.handy_running():
                 self.fail("key1", "handy is not running", blink=True)
-                return "dictation: handy absent"
+                return "dictation.ptt: handy absent"
             xdo_hold(chord, True)
             self.dictation_held = True
-            return "dictation keydown " + chord
+            return "dictation.ptt keydown " + chord
         if self.dictation_held:
             self.dictation_held = False
             xdo_hold(chord, False)
-            return "dictation keyup " + chord
+            return "dictation.ptt keyup " + chord
         return None
 
     def session_rows(self):
@@ -1502,9 +1522,9 @@ class Daemon:
                                                or (directory and term.get("worktreePath") == directory)):
                     if self.orca.send_interrupt(term.get("handle")):
                         return "interrupted %s (orca)" % sid
-        if raise_title("OC | " + str(row.get("title") or "")):
-            time.sleep(0.15)          # let the raise land before the keystroke
-            xdo_key("Escape")         # Esc only — NEVER Ctrl+C (ticket 6)
+        if self.raise_host(row):         # Esc needs the Host focused (spec §5.3 step 3)
+            time.sleep(0.15)             # let the raise land before the keystroke
+            xdo_key("Escape")            # Esc only — NEVER Ctrl+C (ticket 6)
             return "interrupted %s (Esc)" % sid
         self.fail(slot, "Could not interrupt Session %s" % sid)
         return "interrupt failed"
@@ -1516,8 +1536,8 @@ class Daemon:
         rows = [w for w in self.orca.worktrees() if isinstance(w, dict) and not w.get("isArchived")]
         if not rows:
             return "orca: no worktrees"
-        rows.sort(key=lambda w: (w.get("sortOrder") if isinstance(w.get("sortOrder"), int) else 0,
-                                 str(w.get("path") or "")))
+        rows.sort(key=lambda w: (w.get("sortOrder") if isinstance(w.get("sortOrder"), int) else 10 ** 18,
+                                 str(w.get("path") or "")))   # per-row fallback (ticket 4)
         keys = [str((w.get("identity") or {}).get("key") or "") for w in rows]
         keys = [k for k in keys if k]
         if not keys:
@@ -1572,12 +1592,15 @@ class Daemon:
                 return "scroll"
         else:
             command, keys = entry.get("release_command"), entry.get("release_keys")
-        if isinstance(command, str) and command.strip():
-            spawn(command, shell=True)
-            return command.strip()
+        # dispatch order per spec §4: behavior → keys → command
         if isinstance(keys, str) and keys.strip():
             if xdo_key(keys):
                 return "keys " + keys.strip()
+            self.state.set(error="Unknown key combo in Assignment: %s" % keys)
+            return None
+        if isinstance(command, str) and command.strip():
+            spawn(command, shell=True)
+            return command.strip()
         return None
 
     @staticmethod
@@ -1590,12 +1613,12 @@ class Daemon:
             return "behavior " + behavior
         if phase == "press" and entry.get("scroll"):
             return "scroll"
-        command = entry.get("command") if phase == "press" else entry.get("release_command")
-        if isinstance(command, str) and command.strip():
-            return command.strip()
         keys = entry.get("keys") if phase == "press" else entry.get("release_keys")
         if isinstance(keys, str) and keys.strip():
             return "keys " + keys.strip()
+        command = entry.get("command") if phase == "press" else entry.get("release_command")
+        if isinstance(command, str) and command.strip():
+            return command.strip()
         return None
 
     # ---- Control handling ------------------------------------------------------
@@ -1727,7 +1750,7 @@ class Daemon:
         self.state.set(knob_mode={"id": self.current_mode_id(), "label": self.current_mode_label()})
         while self.running:
             now = time.monotonic()
-            reap_children()
+            reap_children(lambda msg: self.state.set(last_error=msg))
             if now >= self.next_config:
                 self.next_config = now + CONFIG_POLL
                 if self.config.reload():
@@ -1806,7 +1829,10 @@ def main(argv):
     daemon = Daemon(probe=probe, grab=grab, battery=battery, lighting_enabled=lighting)
     signal.signal(signal.SIGTERM, daemon.stop)
     signal.signal(signal.SIGINT, daemon.stop)
-    signal.signal(signal.SIGHUP, lambda *_: daemon.config.reload(force=True) or daemon.apply_config_change())
+    def on_hup(*_):
+        daemon.config.reload(force=True)
+        daemon.apply_config_change()
+    signal.signal(signal.SIGHUP, on_hup)
     try:
         daemon.run()
     finally:
