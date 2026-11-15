@@ -37,6 +37,14 @@ gpasswd -a $USER vibekey         # the ONE manual step; then re-login
 systemctl --user enable --now vibekeyd
 ```
 
+> **Re-login vs reboot:** a plain logout only restarts your desktop session — the
+> *user manager* (`user@1000.service`), which is what hands the new group to
+> `vibekeyd.service`, survives logout when **Linger is enabled** or another
+> session (e.g. an agent/SSH one) is still open. If `systemctl --user status
+> vibekeyd` still shows `access: "denied"` after re-login (`state.json` says the
+> same), **reboot** — or stop every session and `systemctl --user daemon-reexec`
+> is *not* enough (proven: re-exec keeps the manager's credentials).
+
 `xdotool wmctrl libnotify python pyside6` come in as deps; **handy 0.10.1** (the
 audited release — AUR `handy`) and `orca` are optdepends: install handy for the
 Dictation Preset, and follow the Panel's **handy card** (tauri backend,
