@@ -576,14 +576,15 @@ def _arcs(p, s, color, r=10.4, rot=0.0):
 
 def draw_mic(p, s, color):
     """mic cap: AU05 engraving — slim capsule, shallow smile-yoke low on the
-    capsule, short tail, light stroke; no foot."""
+    capsule, short tail, light stroke; no foot. Draws larger within the 28
+    grid than the other glyphs (owner: mic reads small otherwise)."""
     k = s / 28.0
-    p.setPen(_pen(color, 1.4 * k)); p.setBrush(Qt.NoBrush)
-    p.drawRoundedRect(12.1 * k, 6.6 * k, 3.8 * k, 8.8 * k, 1.9 * k, 1.9 * k)
-    path = QPainterPath(); path.moveTo(10.4 * k, 13.8 * k)
-    path.cubicTo(10.4 * k, 18.8 * k, 17.6 * k, 18.8 * k, 17.6 * k, 13.8 * k)
+    p.setPen(_pen(color, 1.9 * k)); p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(11.7 * k, 4.7 * k, 4.7 * k, 11.0 * k, 2.4 * k, 2.4 * k)
+    path = QPainterPath(); path.moveTo(9.5 * k, 13.7 * k)
+    path.cubicTo(9.5 * k, 20.0 * k, 18.5 * k, 20.0 * k, 18.5 * k, 13.7 * k)
     p.drawPath(path)
-    p.drawLine(QPointF(14 * k, 17.6 * k), QPointF(14 * k, 19.6 * k))
+    p.drawLine(QPointF(14 * k, 18.5 * k), QPointF(14 * k, 21.2 * k))
 
 
 def draw_check(p, s, color):
