@@ -8,6 +8,7 @@ blocked-by:
   - 0006-agent-preset-design.md
   - 0007-dictation-preset-spec.md
   - 0008-packaging-install-spec.md
+  - 0011-lighting-design.md
 ---
 
 ## Question
