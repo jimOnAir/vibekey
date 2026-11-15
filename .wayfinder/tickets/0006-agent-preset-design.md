@@ -2,7 +2,7 @@
 title: "Agent-preset design for OpenCode/Orca"
 type: wayfinder:grilling
 status: open
-assignee:
+assignee: jimOnAir
 blocked-by:
   - 0003-opencode-surface.md
   - 0004-orca-surface.md
