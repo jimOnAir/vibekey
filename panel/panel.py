@@ -38,8 +38,22 @@ AUTOSTART_FILE = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expandus
 PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))   # /usr/lib/vibekey | repo root
 ACTIONS_PATH = os.path.join(PACKAGE_DIR, "actions.json")
 VIBEKEY_CONFIG = os.path.join(PACKAGE_DIR, "bin", "vibekey-config")
-HANDY_STORE = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
-                           "com.pais.handy", "settings_store.json")
+HANDY_STORES = [
+    # verified against the installed handy 0.10.0 on this box (2026-11-15):
+    # tauri-plugin-store lives in the DATA dir, not the config dir.
+    os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")),
+                 "com.pais.handy", "settings_store.json"),
+    os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+                 "com.pais.handy", "settings_store.json"),
+]
+HANDY_STORE = HANDY_STORES[0]
+
+
+def handy_store_path():
+    for path in HANDY_STORES:
+        if os.path.exists(path):
+            return path
+    return HANDY_STORE
 
 LONG_MS = 400
 ENTRY_FIELDS = ("behavior", "dir", "command", "keys", "release_command", "release_keys", "scroll")
@@ -650,8 +664,13 @@ class PanelWindow(QMainWindow):
         return t if isinstance(t, str) else None
 
     def handy_store(self):
-        data = read_json(HANDY_STORE, None)
-        return data if isinstance(data, dict) else {}
+        """The inner settings map — verified shape (handy 0.10.0, this box):
+        the store file nests everything under a top-level "settings" object."""
+        data = read_json(handy_store_path(), None)
+        if isinstance(data, dict):
+            inner = data.get("settings")
+            return inner if isinstance(inner, dict) else data
+        return {}
 
     def refresh_handy_card(self):
         store = self.handy_store()
@@ -680,23 +699,27 @@ class PanelWindow(QMainWindow):
 
     def fix_handy(self):
         chord = ((self.config.get("buttons") or {}).get("key1") or {}).get("keys") or "ctrl+alt+space"
-        store = self.handy_store()
-        if not store:
+        path = handy_store_path()
+        raw = read_json(path, None)
+        if not isinstance(raw, dict):
             self.set_status("handy's settings_store.json not found — nothing to fix")
             return
-        bindings = store.get("bindings") or {}
+        settings = raw.get("settings") if isinstance(raw.get("settings"), dict) else raw
+        bindings = settings.get("bindings") or {}
         transcribe = bindings.get("transcribe")
         if isinstance(transcribe, dict):
             transcribe["current_binding"] = chord
         else:
             transcribe = chord
         bindings["transcribe"] = transcribe
-        store["bindings"] = bindings
-        tmp = HANDY_STORE + ".vibekey.tmp"
+        settings["bindings"] = bindings
+        if settings is not raw:
+            raw["settings"] = settings
+        tmp = path + ".vibekey.tmp"
         try:
             with open(tmp, "w", encoding="utf-8") as handle:
-                json.dump(store, handle, indent=2)
-            os.replace(tmp, HANDY_STORE)
+                json.dump(raw, handle, indent=2)
+            os.replace(tmp, path)
             self.set_status("handy's transcribe chord set to %s (restart handy to apply)" % chord)
         except OSError as error:
             self.set_status("could not write handy's config: %s" % error)

@@ -225,8 +225,8 @@ entirely** — documented known gap (ticket 6).
   fire): `keyboard_implementation = tauri` (the `handy_keys` backend reads
   `/dev/input` evdev, where XTEST events do not exist — hard trap),
   `shortcut_activation = push_to_talk` (ticket 7 prose calls it
-  "activation_mode"; the store key is `shortcut_activation` — verify against the
-  installed `settings_store.json`), `overlay_style = none`,
+  "activation_mode"; the store key is `shortcut_activation` — **verified**
+  against the installed store: nested under `settings`), `overlay_style = none`,
   `always_on_microphone = true`, `accelerator = cpu` unless a per-box GPU test
   wins. No fallback mode in v1 (no CLI/SIGUSR2 degraded path).
 - Published expectation, in docs and the Preset's tooltip: **~0.5–2 s
@@ -495,8 +495,11 @@ from it, do not redesign:
   `draw_app_icon()` on the prototype branch); menu = show/hide Panel, Quit. Tray
   state conveys Daemon failure states (§5.3) and Knob mode.
 - **handy card** (ticket 7): read-only card reading handy's store
-  (`$XDG_CONFIG_HOME/com.pais.handy/settings_store.json` — Tauri store
-  `SETTINGS_STORE_PATH`, verify on the installed app before shipping) showing
+  (`$XDG_DATA_HOME/com.pais.handy/settings_store.json`, with the config-dir
+  path as fallback — **verified against the installed handy 0.10.0 on this box:
+  data dir, everything nested under a top-level `settings` key**; GPU lives in
+  `transcribe_accelerator`/`transcribe_gpu_device`, chord in
+  `bindings.transcribe.current_binding`) showing
   detected-vs-recommended: `keyboard_implementation=tauri` ✓/✗,
   `shortcut_activation=push_to_talk` ✓/✗ (against the exact config line),
   `always_on_microphone` ON, overlay OFF, model tiers + copy-paste snippet.
