@@ -40,8 +40,9 @@ the Daemon brackets your hold with handy's hotkey —
 - expected feel: **~0.5–2 s** from release to text (fast local models;
   accurate tiers take seconds),
 - the Panel's tray badge watches the audio input independently: no microphone
-  connected at all → orange mic-with-slash on the tray (the AU05's own built-in
-  mic counts, so the badge means *nothing to record*, not *your headset only*).
+  at all, or the default one muted → orange mic-with-slash on the tray. The
+  AU05's own built-in mic counts as a microphone, so the badge means *nothing
+  to record*, not *your headset only*.
 
 Recommended handy settings, all graded by the handy card: push to talk,
 always-on microphone, overlay off, typing tool `xdotool`, a fast model tier on

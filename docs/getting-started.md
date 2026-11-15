@@ -73,8 +73,11 @@ Open **vibekey Panel** (applications menu, or `vibekey-panel`).
   ([docs/lighting.md](lighting.md#device-lighting-mode)).
 - The tray icon mirrors the Knob mode with a corner glyph
   ![tray modes](images/tray-modes.png), grows an orange **!** when the Daemon
-  needs attention, and shows an orange **mic-with-slash** badge the moment the
-  PC has no audio input — Dictation would silently have nothing to record.
+  needs attention, and shows an orange **mic-with-slash** badge when the PC has
+  no audio input **or the default microphone is muted** — Dictation would
+  silently have nothing to record. (A switch on the mic itself is invisible to
+  the OS: nothing changes in the audio stack, so nothing can warn — test with
+  a two-second recording instead.)
 
 ## 6 · Wire the optional half
 

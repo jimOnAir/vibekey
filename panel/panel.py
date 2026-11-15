@@ -95,37 +95,61 @@ def run_vibekey_config(*args):
 # audio input probe — Panel-side only, the Daemon never touches audio (spec §3)
 # ---------------------------------------------------------------------------
 
-def parse_input_sources(text):
-    """Names of real input sources from `pactl list short sources`: tab-separated
-    index/name/module/format/state; sink monitors (name ends `.monitor`) exist for
-    every output and are not microphones."""
-    names = []
+def parse_source_states(text):
+    """{source_name: muted} parsed from `pactl list sources` blocks (Name:/Mute:
+    lines per block). Sink monitors appear here too — filter with `.monitor`."""
+    states, name = {}, None
     for line in text.splitlines():
-        cols = line.split("\t")
-        if len(cols) < 2:
-            continue
-        name = cols[1].strip()
-        if name and not name.endswith(".monitor"):
-            names.append(name)
-    return names
+        s = line.strip()
+        if s.startswith("Name:"):
+            name = s.split(":", 1)[1].strip()
+        elif s.startswith("Mute:") and name:
+            states[name] = s.split(":", 1)[1].strip() == "yes"
+    return states
+
+
+def mic_verdict(states, default):
+    """('ok'|'missing'|'muted', detail) from source states + the default source."""
+    inputs = [n for n in states if not n.endswith(".monitor")]
+    if not inputs:
+        return "missing", ""
+    if states.get(default, False) or all(states[n] for n in inputs):
+        return "muted", default or inputs[0]
+    return "ok", default or inputs[0]
 
 
 _MIC_CACHE = [0.0, "unknown", ""]   # (checked_at, state, detail)
 
 
 def mic_status(ttl=5.0):
-    """('ok'|'missing'|'unknown', detail) — is any microphone connected? Cached so
-    the Panel poll and the tray timer share one pactl call. 'unknown' (no pactl,
-    dead server) never warns — only a real zero of input sources draws the badge."""
+    """('ok'|'missing'|'muted'|'unknown', detail) — is a usable microphone
+    there? Panel-side only, the Daemon never touches audio (spec §3). Cached so
+    the Panel poll and the tray timer share one probe. A hardware mic switch or
+    an unplugged 3.5 mm plug is invisible to PipeWire on this audio hardware
+    (no jack detection) — software mute and total absence are not, and warn.
+    'unknown' (no pactl, dead server) never warns."""
     now = time.monotonic()
     if now - _MIC_CACHE[0] >= ttl:
         state, detail = "unknown", ""
         try:
-            proc = subprocess.run(["pactl", "list", "short", "sources"],
+            proc = subprocess.run(["pactl", "list", "sources"],
                                   capture_output=True, text=True, timeout=2.0, check=False)
             if proc.returncode == 0:
-                names = parse_input_sources(proc.stdout)
-                state, detail = ("ok", names[0]) if names else ("missing", "")
+                states = parse_source_states(proc.stdout)
+                default = ""
+                try:   # older pactl lacks get-default-source; pactl info has it too
+                    dproc = subprocess.run(["pactl", "get-default-source"],
+                                           capture_output=True, text=True, timeout=2.0, check=False)
+                    default = dproc.stdout.strip()
+                    if dproc.returncode != 0 or not default:
+                        iproc = subprocess.run(["pactl", "info"], capture_output=True,
+                                               text=True, timeout=2.0, check=False)
+                        for line in iproc.stdout.splitlines():
+                            if line.startswith("Default Source:"):
+                                default = line.split(":", 1)[1].strip()
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+                state, detail = mic_verdict(states, default)
         except (OSError, subprocess.TimeoutExpired):
             pass
         _MIC_CACHE[0], _MIC_CACHE[1], _MIC_CACHE[2] = now, state, detail
@@ -813,6 +837,9 @@ class PanelWindow(QMainWindow):
         mic_state, mic_detail = mic_status()
         if mic_state == "ok":
             self.handy_mic.setText("✓ audio input: %s" % mic_detail)
+        elif mic_state == "muted":
+            self.handy_mic.setText("<span style='color:#c0392b'>✗ microphone is muted (%s)"
+                                   " — Dictation records nothing</span>" % mic_detail)
         elif mic_state == "missing":
             self.handy_mic.setText("<span style='color:#c0392b'>✗ microphone not connected"
                                    " — Dictation will not work</span>")
@@ -1041,9 +1068,9 @@ class TrayApp:
         tip = "vibekey — AU05 control surface"
         if label:
             tip += " · Knob mode: %s" % label
-        mic_off = self.mic == "missing"
+        mic_off = self.mic in ("missing", "muted")
         if mic_off:
-            tip += " · microphone not connected"
+            tip += " · microphone " + ("muted" if self.mic == "muted" else "not connected")
         if problem:
             tip += " · see the Panel (attention badge)"
         tray.setIcon(self.build_icon(problem, mode.get("id"), label, mic_off))
