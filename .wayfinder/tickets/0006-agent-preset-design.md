@@ -16,11 +16,20 @@ the terminal running the agent*, *interrupt*; stretch: *Orca next-worktree*.
 
 This ticket settles mechanics and edge behaviour:
 
-- Map each preset onto the controls (✓ / ✕ / knob turn) sensibly; which land
+- Map each Preset onto the Controls (✓ / ✕ / knob turn) sensibly; which land
   on knob directions.
-- Mechanism per preset: API call vs key injection into the target window
-  (per the two surface-research answers).
-- No-session / no-agent-running / terminal-not-found behaviour, and what the
-  panel + OSD report when a preset cannot do its thing.
-- Whether interrupt means Esc, Ctrl+C, or an API abort — per firmware/TUI
-  findings.
+- **next/prev Session**: adopt the composed mechanism (API session ring of
+  root `ses_…` ids → host resolve: Orca `terminal switch` with title/directory
+  match, else `wmctrl -a` on `OC | ` title)? Orca drift gap (Daemon-owned
+  cursor vs sidebar clicks) — accept or mitigate? In-TUI `ctrl+tab` route —
+  expose at all?
+- **interrupt**: confirm API-first (`POST /api/session/{id}/interrupt`,
+  no focus needed) with Esc-only keystroke fallback; `orca terminal send
+  --interrupt` as the Orca-native alternative. Codify **never Ctrl+C**
+  (empty-prompt exit path).
+- Focus-presets for `--standalone` TUIs (API-opaque): window/title route only —
+  in v1 or out?
+- Behaviour and Panel/OSD report when: no OpenCode service running, no root
+  Sessions, Session id stale, Orca not running mid-cycle.
+- The Daemon's service discovery: read `~/.local/state/opencode/service.json`
+  for port + Basic auth? Refresh policy when the service restarts.
