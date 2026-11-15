@@ -41,7 +41,8 @@ Three pieces, one package:
    match on "mouse" (`vibekeyd:601-602`; the **Grab** exemption the `scroll`
    Knob mode and risk R8 depend on) — drains grabbed fds so `select()` doesn't
    spin, decodes HID reports into the six Controls, runs Assignments, owns the
-   `lighting` subsystem (§5), polls battery (60 s), writes `state.json`.
+   `lighting` subsystem (§5), polls battery (15 s vendor keepalive, §5.6),
+   writes `state.json`.
    Compositor-independence is verified: the Grab is enforced in the kernel input
    core (libinput never issues `EVIOCGRAB`), and hidraw copies raw reports
    *before* the input layer, so report reading stays complete during the Grab
@@ -63,7 +64,7 @@ guard on `$XDG_RUNTIME_DIR/vibekey/lock` stays.
 ### 2.1 What is kept vs replaced (port audit, ticket 1)
 
 **KEEP (as-is unless noted):** device core (discovery, TEA transport, report
-decode, Grab, battery poll), hidraw as the read channel (the Voice Control's
+decode, Grab, battery poll + link keepalive), hidraw as the read channel (the Voice Control's
 factory usage `0x01` ErrorRollOver never becomes an evdev event), `state.json` /
 `preview` / config-watcher / `seen.json` file protocol (§3), `actions.json`
 **schema** (with the one addition in §4.2), `vibekey-config`, first-run config
@@ -111,7 +112,7 @@ Config dir `~/.config/vibekey/`, runtime dir `$XDG_RUNTIME_DIR/vibekey/`:
 | `config.json` | only via `vibekey-config` (atomic replace) | Daemon (0.5 s mtime poll + SIGHUP), Panel | schema §4 |
 | `seen.json` | Daemon (per press) | Panel | learned raw ids for Alias UX |
 | `actions.json` (catalogue) | package (`/usr/lib/vibekey/actions.json`) | Daemon (seed + behavior-presets), Panel (picker) | resolved relative to the package dir, **not** `bin/`-relative — a wrong path silently no-ops first-run seeding (risk R6) |
-| `state.json` | Daemon only, rewritten in place on every event | Panel (`QFileSystemWatcher` + 1 s/5 s poll) | fields: upstream set (`version,pid,connected,access,grabbed,mouse_passthrough,preview,knob_position,device,battery,last,events,error,updated`) **plus** `knob_mode` (§5.3), `last_error` (§5.3 failure surface) and `lighting` incl. `device_mode`: `0|1|2|"unknown"|"disabled"`, `pending_mode`, `last_error` (§5.5) |
+| `state.json` | Daemon only, rewritten in place on every event | Panel (`QFileSystemWatcher` + 1 s/5 s poll) | fields: upstream set (`version,pid,connected,access,grabbed,mouse_passthrough,preview,knob_position,device,battery,last,events,error,updated`) **plus** `knob_mode` (§5.3), `last_error` (§5.3 failure surface), `keypad` (`online`, `at` — wireless-link state, §5.6) and `lighting` incl. `device_mode`: `0|1|2|"unknown"|"disabled"`, `pending_mode`, `last_error` (§5.5) |
 | `preview` | Panel (`open` every 2 s while shown, `closed` on hide) | Daemon (trusts `open` for 6 s) | while active: events are reported, nothing runs |
 | `manage_lights` | Panel (one-shot `"manage"`) | Daemon (consumes + unlinks on its 0.5 s poll) | the consented Manage lights request (§5.5) — the Panel never touches the vendor channel |
 
@@ -178,7 +179,9 @@ vs *RAN (sim)* for its own simulated clicks (§8).
   module writes (effective level = level × brightness).
   Hot-reloaded by the existing 0.5 s config poll. The switches are feature
   toggles: `mode_ring` §5.3, `fail_blink` §5.4, `low_battery` §5.4.
-- **`grab`** / **`battery`** / **`aliases`**: upstream semantics, unchanged.
+- **`grab`** / **`battery`** / **`aliases`**: upstream semantics; `battery` now
+  also gates the link-keepalive probe (§5.6) — with it off, link state stays
+  optimistic.
 - The `knob` slot is **fixed behaviour in v1** (§5.3): press = Knob-mode cycle,
   long-press = Enter injection (ticket 6 — not a user Assignment; upstream's
   `knob: key_enter` default is subsumed by that fixed behaviour).
@@ -307,7 +310,7 @@ fast on↔off pairs at level 16, ring untouched. Fire-time-only blinks dodge the
 standby gotcha: if the user just pressed a key, the device is awake.
 No ambient blinks.
 
-Low battery (on the existing 60 s battery poll): `percent ≤ 10 && !charging` →
+Low battery (on the §5.2 keepalive battery poll): `percent ≤ 10 && !charging` →
 knob ring `breathe:6` while it lasts + exactly **one** `notify-send` per crossing;
 hysteresis resets the latch at `> 20` %. The feature (ring indication and the
 notification together) is gated by the `low_battery` switch.
@@ -404,6 +407,28 @@ The Daemon is a **guest with one consented Manage lights**:
   unaffected), `device_mode: "disabled"`, no notify — cleanest form of "be
   the only config host" for users who deliberately killed all lighting.
   Hot-reload turning any switch on triggers a GET immediately.
+
+### 5.6 Wireless link awareness (owner ask, 2026-11-15)
+
+The AU05 is wireless behind the Dongle: it drops its 2.4 GHz link after ~5
+idle minutes (or a power switch), while its USB nodes and its PipeWire mic
+source **remain** — so neither `/dev` presence nor `pactl` can distinguish
+"keypad off" from "keypad idle" (field-proven: capture returns digital
+silence while the node is up). The Daemon therefore owns the truth:
+
+- the battery poll (every 15 s, `BATTERY_INTERVAL`) doubles as a keepalive —
+  a vendor answer to any request, or any input event, refreshes `last_contact`;
+- no contact for `LINK_STALE` (40 s) → `state.json` publishes
+  `keypad: {"online": false, "at": …}`; first event/reply republishes true;
+- optimistic at connect (ticket 12's posture); with config `battery: false`
+  the probe is off and the online posture stands (documented trade-off).
+
+The Panel's tray mic badge and handy card consume it: **badge = the AU05's
+Dictation mic is unusable now** — dongle gone (`connected: false`), keypad
+asleep/off (`keypad.online: false`), or the audio stack is broken (missing /
+muted, the only pactl-sourced case). The keypad cannot be woken from the host
+(writes to a sleeping keypad are dropped, §5.4) — the badge tells the user to
+press a key, which is itself the proof of life.
 
 ## 6. xdotool specifics for the Panel (editors)
 

@@ -121,6 +121,22 @@ def mic_verdict(states, default):
 _MIC_CACHE = [0.0, "unknown", ""]   # (checked_at, state, detail)
 
 
+def mic_badge(state, stack_state):
+    """(show, tooltip_suffix) for the tray's mic-with-slash badge. The owner's
+    Dictation mic is the AU05's built-in one, so the primary truth is what the
+    Daemon says about the keypad's presence; the pactl audio stack (missing /
+    muted) only adds checks for the keypad-is-here-but-audio-is-broken cases."""
+    if state.get("connected") is False:
+        return True, "AU05 not connected — Dictation mic offline"
+    if (state.get("keypad") or {}).get("online") is False:
+        return True, "AU05 asleep or switched off — press a key to wake it"
+    if stack_state == "missing":
+        return True, "microphone not connected"
+    if stack_state == "muted":
+        return True, "microphone muted"
+    return False, ""
+
+
 def mic_status(ttl=5.0):
     """('ok'|'missing'|'muted'|'unknown', detail) — is a usable microphone
     there? Panel-side only, the Daemon never touches audio (spec §3). Cached so
@@ -835,16 +851,22 @@ class PanelWindow(QMainWindow):
 
     def refresh_handy_card(self):
         mic_state, mic_detail = mic_status()
-        if mic_state == "ok":
-            self.handy_mic.setText("✓ audio input: %s" % mic_detail)
+        if self.state.get("connected") is False:
+            self.handy_mic.setText("<span style='color:#c0392b'>✗ AU05 not connected — its built-in"
+                                   " mic is the Dictation source</span>")
+        elif (self.state.get("keypad") or {}).get("online") is False:
+            self.handy_mic.setText("<span style='color:#c0392b'>✗ AU05 asleep or switched off"
+                                   " — press a key to wake it (mic idle)</span>")
         elif mic_state == "muted":
-            self.handy_mic.setText("<span style='color:#c0392b'>✗ microphone is muted (%s)"
+            self.handy_mic.setText("<span style='color:#c0392b'>✗ audio input is muted (%s)"
                                    " — Dictation records nothing</span>" % mic_detail)
         elif mic_state == "missing":
-            self.handy_mic.setText("<span style='color:#c0392b'>✗ microphone not connected"
-                                   " — Dictation will not work</span>")
+            self.handy_mic.setText("<span style='color:#c0392b'>✗ no audio input the OS can see"
+                                   " — check the AU05 connection</span>")
+        elif mic_state == "unknown":
+            self.handy_mic.setText("· audio stack: unknown (pactl unavailable)")
         else:
-            self.handy_mic.setText("· audio input: unknown (pactl unavailable)")
+            self.handy_mic.setText("✓ AU05 connected — Dictation mic available")
         store = self.handy_store()
         recommended = {"keyboard_implementation": "tauri", "shortcut_activation": "push_to_talk",
                        "always_on_microphone": True, "overlay_style": None}
@@ -1068,9 +1090,9 @@ class TrayApp:
         tip = "vibekey — AU05 control surface"
         if label:
             tip += " · Knob mode: %s" % label
-        mic_off = self.mic in ("missing", "muted")
+        mic_off, mic_tip = mic_badge(state, self.mic)
         if mic_off:
-            tip += " · microphone " + ("muted" if self.mic == "muted" else "not connected")
+            tip += " · " + mic_tip
         if problem:
             tip += " · see the Panel (attention badge)"
         tray.setIcon(self.build_icon(problem, mode.get("id"), label, mic_off))

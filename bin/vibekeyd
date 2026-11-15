@@ -65,7 +65,9 @@ MANAGE_LIGHTS_PATH = os.path.join(RUNTIME_DIR, "manage_lights")  # Panel's conse
 EVIOCGRAB = 0x40044590
 INPUT_EVENT_SIZE = struct.calcsize("llHHi")
 
-BATTERY_INTERVAL = 60.0
+BATTERY_INTERVAL = 15.0  # vendor keepalive cadence: battery reports double as the
+                         # keypad wireless-link probe (owner ask, 2026-11-15)
+LINK_STALE = 40.0        # no keypad answer for this long → asleep or switched off
 PREVIEW_PATH = os.path.join(RUNTIME_DIR, "preview")   # the Panel heartbeats "open" here while shown
 PREVIEW_MAX_AGE = 6.0
 RESCAN_INTERVAL = 0.7  # the Dongle reboots on its watchdog until something holds the channels open
@@ -423,6 +425,7 @@ class State:
             "knob_mode": None,
             "device": None,
             "battery": None,
+            "keypad": None,
             "last": None,
             "events": 0,
             "error": "",
@@ -1347,6 +1350,10 @@ class Daemon:
         self.next_rescan = 0.0
         self.next_battery = 0.0
         self.next_config = 0.0
+        # wireless link tracking (vendor replies and input events prove the
+        # keypad is awake; silence means asleep/off — mic idle too)
+        self.last_contact = 0.0
+        self.keypad_online = None
         self.running = True
         self.events = 0
         self.knob_position = 0
@@ -1454,6 +1461,11 @@ class Daemon:
                        device={"name": PRODUCT_NAME, "inputs": self.device.names,
                                "vendor_channel": self.device.vendor_fd is not None})
         self.next_battery = time.monotonic() + 1.0
+        # optimistic posture (ticket 12 rule): a fresh link is online until the
+        # keepalive proves otherwise
+        self.last_contact = time.monotonic()
+        self.keypad_online = True
+        self.state.set(keypad={"online": True, "at": time.time()})
         if self.allow_lighting:
             self.lighting.on_connected(self.config)
         return True
@@ -1687,6 +1699,7 @@ class Daemon:
         return slot
 
     def handle_control(self, raw_id, label, phase):
+        self.last_contact = time.monotonic()   # any event proves the keypad is awake
         slot = self.slot_for(raw_id)
         preview = self.preview_active()
         entry = None
@@ -1740,6 +1753,7 @@ class Daemon:
         })
 
     def handle_vendor(self, plain):
+        self.last_contact = time.monotonic()   # any vendor answer proves the link
         if len(plain) >= 3 and (plain[0] & 0x80):
             if self.allow_lighting and self.lighting.handle_reply(plain):
                 return
@@ -1763,6 +1777,20 @@ class Daemon:
             return
         self.next_battery = now + BATTERY_INTERVAL
         self.device.request_battery()
+
+    def poll_link(self, now):
+        """Wireless-link awareness (owner ask, 2026-11-15): the keypad answers
+        either to vendor requests or with events; nothing for LINK_STALE seconds
+        means it is asleep or switched off — the USB node stays, so PipeWire
+        cannot tell, but this can. Meaningful only while the vendor keepalive
+        runs (config battery: true); otherwise the optimistic posture stands."""
+        if not (self.allow_battery and self.config.battery):
+            return
+        online = (now - self.last_contact) <= LINK_STALE
+        if online != self.keypad_online:
+            self.keypad_online = online
+            log("keypad link:", "asleep or off" if not online else "alive again")
+            self.state.set(keypad={"online": online, "at": time.time()})
 
     def want_mouse_passthrough(self):
         return self.knob_scroll_active() and not self.preview_active()
@@ -1819,6 +1847,7 @@ class Daemon:
                 time.sleep(min(CONFIG_POLL, max(0.05, self.next_rescan - time.monotonic())))
                 continue
             self.poll_battery(now)
+            self.poll_link(now)
             try:
                 ready, _, _ = select.select(self.device.fds(), [], [], CONFIG_POLL)
             except (OSError, ValueError) as error:

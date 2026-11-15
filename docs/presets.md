@@ -39,10 +39,11 @@ the Daemon brackets your hold with handy's hotkey —
   and offers a consented **Fix handy**,
 - expected feel: **~0.5–2 s** from release to text (fast local models;
   accurate tiers take seconds),
-- the Panel's tray badge watches the audio input independently: no microphone
-  at all, or the default one muted → orange mic-with-slash on the tray. The
-  AU05's own built-in mic counts as a microphone, so the badge means *nothing
-  to record*, not *your headset only*.
+- the Panel's tray badge watches the mic path end to end: Dongle unplugged,
+  keypad asleep/off (its link drops after ~5 idle minutes — a key press wakes
+  it and clears the badge), or the system input gone/muted → orange
+  mic-with-slash. Your Dictation mic is the AU05's built-in one, so the
+  badge tracks *that keypad's* link first of all.
 
 Recommended handy settings, all graded by the handy card: push to talk,
 always-on microphone, overlay off, typing tool `xdotool`, a fast model tier on

@@ -73,11 +73,12 @@ Open **vibekey Panel** (applications menu, or `vibekey-panel`).
   ([docs/lighting.md](lighting.md#device-lighting-mode)).
 - The tray icon mirrors the Knob mode with a corner glyph
   ![tray modes](images/tray-modes.png), grows an orange **!** when the Daemon
-  needs attention, and shows an orange **mic-with-slash** badge when the PC has
-  no audio input **or the default microphone is muted** — Dictation would
-  silently have nothing to record. (A switch on the mic itself is invisible to
-  the OS: nothing changes in the audio stack, so nothing can warn — test with
-  a two-second recording instead.)
+  needs attention, and shows an orange **mic-with-slash** badge whenever your
+  **Dictation mic is unusable**: the AU05 Dongle is unplugged, the keypad is
+  **asleep or switched off** (its USB/mic nodes stay — the Daemon's vendor
+  keepalive knows), or the system audio has no/muted input. A hardware mute
+  switch on a wired mic changes nothing in the audio stack, so it cannot warn;
+  a two-second test recording is the proof there.
 
 ## 6 · Wire the optional half
 

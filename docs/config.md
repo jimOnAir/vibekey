@@ -20,7 +20,8 @@ respected (only a *missing* file is seeded).
 {
   "grab": true,                      // shape kept from upstream; the Grab itself
                                      // is toggled by the unit/CLI, not here
-  "battery": true,                   // false stops the 60 s vendor poll
+  "battery": true,                   // false stops the 15 s vendor keepalive
+                                     // (battery reports + AU05 link awareness)
 
   "knob_modes": ["scroll", "sessions", "volume"],   // ordered; knob press cycles
                                                      // through these catalogue ids
@@ -85,7 +86,7 @@ without disturbing the other:
 |---|---|---|---|
 | `config.json` | `vibekey-config` only (atomic replace) | Daemon (mtime poll + `SIGHUP`), Panel | the truth |
 | `seen.json` | Daemon | Panel | every raw report the unit ever sent — feeds the Alias UX |
-| `state.json` | Daemon (in-place rewrite per event) | Panel (watcher + poll) | `connected`, `access`, `grabbed`, `battery`, `knob_mode`, `knob_position`, `last` (narrated event), `lighting{device_mode, channels, last_error}`, `error`/`last_error` |
+| `state.json` | Daemon (in-place rewrite per event) | Panel (watcher + poll) | `connected`, `access`, `grabbed`, `battery`, `keypad{online, at}` (wireless link — asleep/off keypad still has its USB nodes), `knob_mode`, `knob_position`, `last` (narrated event), `lighting{device_mode, channels, last_error}`, `error`/`last_error` |
 | `preview` | Panel (`open` every 2 s while shown, `closed` on hide) | Daemon | freshness ≤ 6 s; while live, nothing runs |
 | `manage_lights` | Panel (one-shot `"manage"`) | Daemon (consumes) | the consented [Device lighting mode](lighting.md#device-lighting-mode) request |
 | `lock` | `flock` by the Daemon | — | double-start guard |

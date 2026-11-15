@@ -44,12 +44,13 @@ session's values (`tr '\0' '\n' < /proc/$(pgrep -u $UID -x plasmashell)/environ 
 Work the chain:
 
 0. **Tray mic badge?** An orange mic-with-slash on the tray icon (or the ✗ line
-   atop the Panel's handy card) means the OS sees **no usable input** — nothing
-   connected, or the default source muted. But the reverse is not a guarantee:
-   a hardware mute switch on the mic/cable changes nothing in the audio stack
-   (cheap USB chips have no jack detection either), so if the badge is quiet
-   yet nothing transcribes, record a two-second test clip (e.g. `arecord -d 2
-   t.wav`) and play it back before blaming the chain below.
+   atop the Panel's handy card) means Dictation's mic is unusable right now:
+   Dongle unplugged, keypad **asleep/off** (press any AU05 key — it answers and
+   the badge clears within a second), or no/unmuted-less audio input. Note the
+   reverse is not a guarantee: a hardware mute switch on a wired mic changes
+   nothing in the audio stack (cheap chips report no jack events), so if the
+   badge is quiet yet nothing transcribes, record a two-second proof
+   (`arecord -d 2 t.wav`) and play it back before blaming the chain below.
 1. **Is handy running?** vibekey never starts it — `pgrep -x handy`, and check
    the tray (Plasma hides icons by default — the `^` overflow).
 2. **Right backend?** handy must keep `keyboard_implementation = tauri`.
