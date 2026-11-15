@@ -285,7 +285,7 @@ class KeypadWidget(QFrame):
         p.setPen(QColor("#aeb0b4")); p.setBrush(kg)
         p.drawEllipse(74 - 40, 75 - 40, 80, 80)
         p.setPen(QPen(QColor("#8f9297"), 1.8))
-        for ang in (60, 120, 240, 300):
+        for ang in (0, 90, 180, 270):  # grip marks every 90°, per the real knob
             x1, y1 = 74 + 32 * math.cos(math.radians(ang)), 75 - 32 * math.sin(math.radians(ang))
             x2, y2 = 74 + 38 * math.cos(math.radians(ang)), 75 - 38 * math.sin(math.radians(ang))
             p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
