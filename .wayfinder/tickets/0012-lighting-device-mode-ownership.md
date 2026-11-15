@@ -2,7 +2,7 @@
 title: "Lighting device-mode ownership"
 type: wayfinder:grilling
 status: open
-assignee:
+assignee: jimOnAir
 blocked-by: []
 ---
 
