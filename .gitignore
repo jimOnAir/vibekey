@@ -3,3 +3,4 @@ __pycache__/
 src/
 pkg/
 *.tar.gz
+*.pkg.tar.zst
