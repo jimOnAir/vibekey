@@ -642,7 +642,9 @@ def draw_turn(cw):
 
 
 def line_icon(fn, px=28):
-    """QIcon with normal (graphite) + active (white, for pressed caps) pixmaps."""
+    """QIcon with normal (graphite) + active (white, for pressed caps) pixmaps.
+    NOTE: pixmaps must be rendered at exactly `px` — a stylesheet'd QPushButton
+    draws QIcon at the pixmap's native size and ignores setIconSize."""
     normal = QPixmap(px, px); normal.fill(Qt.transparent)
     p = QPainter(normal); p.setRenderHint(QPainter.Antialiasing); fn(p, px, INK); p.end()
     active = QPixmap(px, px); active.fill(Qt.transparent)
