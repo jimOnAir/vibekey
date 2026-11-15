@@ -556,15 +556,15 @@ def _pen(color, w):
     return QPen(QColor(color), w, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
 
 
-def _arcs(p, s, color, r=10.4):
-    """the AU05 cap motif: two open arcs (split circle, gaps top/bottom)."""
+def _arcs(p, s, color, r=10.4, rot=0.0):
+    """the AU05 cap motif: two open arcs (split circle); rot turns the gap."""
     import math
     k = s / 28.0
     p.setPen(_pen(color, 2.2 * k))
     p.setBrush(Qt.NoBrush)
     cx = cy = 14 * k
     rr = r * k
-    for a0, a1 in ((112.0, 248.0), (68.0, -68.0)):
+    for a0, a1 in ((112.0 + rot, 248.0 + rot), (68.0 + rot, -68.0 + rot)):
         prev = None
         steps = 14
         for i in range(steps + 1):
@@ -576,27 +576,32 @@ def _arcs(p, s, color, r=10.4):
 
 
 def draw_mic(p, s, color):
+    """mic cap: plain mic glyph, no arcs."""
     k = s / 28.0
-    _arcs(p, s, color)
-    p.setPen(_pen(color, 1.9 * k)); p.setBrush(Qt.NoBrush)
-    p.drawRoundedRect(12.2 * k, 9.6 * k, 3.6 * k, 8.4 * k, 1.8 * k, 1.8 * k)
-    p.drawLine(QPointF(12.3 * k, 20.2 * k), QPointF(15.7 * k, 20.2 * k))
+    p.setPen(_pen(color, 2.2 * k)); p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(11.2 * k, 4.5 * k, 5.6 * k, 11.5 * k, 2.8 * k, 2.8 * k)
+    path = QPainterPath(); path.moveTo(9 * k, 13 * k)
+    path.cubicTo(9 * k, 20.5 * k, 19 * k, 20.5 * k, 19 * k, 13 * k)
+    p.drawPath(path)
+    p.drawLine(QPointF(14 * k, 19 * k), QPointF(14 * k, 23.5 * k))
+    p.drawLine(QPointF(10.5 * k, 23.5 * k), QPointF(17.5 * k, 23.5 * k))
 
 
 def draw_check(p, s, color):
-    """accept cap: diagonal slash (stylised check) between the two arcs."""
+    """accept cap: diagonal slash between the two arcs, gap on the diagonal."""
     k = s / 28.0
-    _arcs(p, s, color)
+    _arcs(p, s, color, rot=-45.0)
     p.setPen(_pen(color, 2.4 * k)); p.setBrush(Qt.NoBrush)
-    p.drawLine(QPointF(12.4 * k, 15.8 * k), QPointF(15.6 * k, 12.2 * k))
+    p.drawLine(QPointF(10.8 * k, 17.2 * k), QPointF(17.2 * k, 10.8 * k))
 
 
 def draw_cross(p, s, color):
+    """cancel cap: cross between the two arcs, gap on the diagonal."""
     k = s / 28.0
-    _arcs(p, s, color)
+    _arcs(p, s, color, rot=-45.0)
     p.setPen(_pen(color, 2.2 * k))
-    p.drawLine(QPointF(12.1 * k, 12.1 * k), QPointF(15.9 * k, 15.9 * k))
-    p.drawLine(QPointF(15.9 * k, 12.1 * k), QPointF(12.1 * k, 15.9 * k))
+    p.drawLine(QPointF(11.6 * k, 11.6 * k), QPointF(16.4 * k, 16.4 * k))
+    p.drawLine(QPointF(16.4 * k, 11.6 * k), QPointF(11.6 * k, 16.4 * k))
 
 
 def draw_cross_circle(p, s, color):
