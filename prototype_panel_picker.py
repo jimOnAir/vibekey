@@ -7,8 +7,8 @@
 #
 # Run:  python3 prototype_panel_picker.py [--variant=A|B|C]
 #
-# Variant A "drawn keypad" — the panel draws the device; press a control on the
-#   drawing (preview glows), Edit… opens the grouped-tile picker on the right.
+# Variant A "drawn device" — the panel draws the real AU05 (aluminium bar,
+#   knob, ⏻/⊘/⊗ keys, end-bar); press simulates, double-click edits.
 # Variant B "list editor"  — ordinary KDE settings window; a table of the six
 #   Controls, picker is a dialog; knob modes are a reorderable list.
 # Variant C "tray HUD"     — no window at all: frameless dark popover, chips
@@ -100,7 +100,8 @@ class Model:
             else:
                 line = f"{kind} → {self.shown(kind)}   [{verb}]"
         else:
-            line = f"{detail} → {self.shown(detail)}   [{verb}]"
+            label = {k: l for k, l in CONTROLS}.get(kind, kind)
+            line = f"{label} press → {self.shown(kind)}   [{verb}]"
         self.log.append(line)
         return line
 
@@ -211,15 +212,87 @@ class BaseWindow(QMainWindow):
         pass
 
 
-class VariantA(BaseWindow):
-    """Drawn keypad, left; assignment overview (picker via dialog), right."""
+class KeypadWidget(QFrame):
+    """Drawn to match the real AU05 (ulanzi.com product photos): aluminium
+    bar, knob over the mic/speaker end, three round-capped keys in square
+    housings (⏻ ⊘ ⊗), long ⊗ end-bar, Vibekey logo. Interactive zones are
+    transparent SimButtons positioned over the art."""
 
-    NAME = "A — drawn keypad"
+    W, H = 470, 150
+
+    def __init__(self, model, edit_cb):
+        import math
+        super().__init__()
+        self.setFixedSize(self.W, self.H)
+        spec = [  # (key, icon, cx, cy, r) — zones over the drawn art
+            ("knob_press", "", 74, 75, 36),
+            ("voice", "⏻", 168, 75, 24),
+            ("confirm", "⊘", 233, 75, 24),
+            ("cancel", "⊗", 298, 75, 24),
+        ]
+        for key, icon, cx, cy, r in spec:
+            b = SimButton(model, key, icon, edit_cb, self)
+            b.setFlat(True)
+            b.setStyleSheet(
+                "QPushButton{background:transparent;border:none;font-size:19px;color:#55585e}"
+                "QPushButton:pressed{background:rgba(61,132,246,150);border-radius:%dpx;color:white}" % r)
+            b.setGeometry(cx - r, cy - r, 2 * r, 2 * r)
+            b.setToolTip(dict(CONTROLS)[key] if key in dict(CONTROLS) else "Knob (hold ≥%d ms = Enter)" % LONG_MS)
+        for key, dx in (("knob_l", -1), ("knob_r", 1)):
+            b = SimButton(model, key, "⟲" if dx < 0 else "⟳", None, self)
+            b.setFlat(True)
+            b.setStyleSheet("QPushButton{background:transparent;border:none;color:#8a8d93;font-size:14px}"
+                            "QPushButton:pressed{color:#3d84f6}")
+            b.setGeometry(74 + dx * 52 - 12, 75 - 48, 24, 22)
+            b.setToolTip("knob turn " + ("◀" if dx < 0 else "▶"))
+
+    def paintEvent(self, e):
+        import math
+        from PySide6.QtGui import QLinearGradient
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        g = QLinearGradient(0, 0, 0, self.H)
+        g.setColorAt(0, QColor("#e9eaec")); g.setColorAt(0.5, QColor("#d8dadc")); g.setColorAt(1, QColor("#c6c8cc"))
+        p.setPen(QColor("#b3b5b9")); p.setBrush(g)
+        p.drawRoundedRect(6, 6, self.W - 12, self.H - 12, 24, 24)
+        # knob with grip notches
+        p.setPen(QColor("#aeb0b4")); p.setBrush(QColor("#fafafa"))
+        p.drawEllipse(74 - 40, 75 - 40, 80, 80)
+        p.setPen(QColor("#b9bcc0"))
+        for ang in (60, 120, 240, 300):
+            x1, y1 = 74 + 32 * math.cos(math.radians(ang)), 75 - 32 * math.sin(math.radians(ang))
+            x2, y2 = 74 + 38 * math.cos(math.radians(ang)), 75 - 38 * math.sin(math.radians(ang))
+            p.drawLine(int(x1), int(y1), int(x2), int(y2))
+        # key housings (square rounded) + white round caps
+        for cx in (168, 233, 298):
+            p.setPen(QColor("#b6b8bc")); p.setBrush(QColor("#eceef0"))
+            p.drawRoundedRect(cx - 28, 75 - 28, 56, 56, 12, 12)
+            p.setPen(Qt.NoPen); p.setBrush(QColor("#fafafa"))
+            p.drawEllipse(cx - 22, 75 - 22, 44, 44)
+        # long end-bar with ⊗
+        p.setPen(QColor("#b6b8bc")); p.setBrush(QColor("#eceef0"))
+        p.drawRoundedRect(340, 47, 112, 56, 14, 14)
+        p.setPen(QColor("#7c7f85")); p.setFont(QFont("sans", 13))
+        p.drawText(340, 47, 112, 56, Qt.AlignCenter, "⊗")
+        # mic slots + logo near the knob end
+        p.setPen(Qt.NoPen); p.setBrush(QColor("#9c9ea3"))
+        for i in range(4):
+            p.drawRoundedRect(20 + i * 7, 20, 3, 10, 1.5, 1.5)
+        p.setPen(QColor("#8f9297")); p.setFont(QFont("sans", 7))
+        p.drawText(14, 128, 90, 12, Qt.AlignLeft, "Vibekey")
+        p.end()
+
+
+class VariantA(BaseWindow):
+    """Drawn device (matches Ulanzi product photos), left; assignment
+    overview (picker via dialog), right."""
+
+    NAME = "A — drawn device"
 
     def __init__(self, model):
         super().__init__(model)
         self.setWindowTitle("Vibekey (PROTOTYPE A)")
-        self.resize(700, 400)
+        self.resize(880, 400)
         root = QWidget()
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
@@ -232,25 +305,18 @@ class VariantA(BaseWindow):
         body = QHBoxLayout()
         outer.addLayout(body)
 
-        pad = QFrame()
-        pad.setFixedSize(300, 320)
-        pad.setStyleSheet(
-            "QFrame{background:#1d1f24;border-radius:16px}"
-            "QPushButton{background:#2b2e36;color:#e8e8ea;border-radius:10px;"
-            "padding:10px;font-size:13px}QPushButton:pressed{background:#3d84f6;color:white}")
-        pg = QGridLayout(pad)
-        ed = self.edit_assignment
-        pg.addWidget(SimButton(model, "voice", "◉ Voice", ed), 0, 0, 1, 3)
-        pg.addWidget(SimButton(model, "confirm", "✓", ed), 1, 0)
-        pg.addWidget(SimButton(model, "knob_press", "◎\npress / hold", ed), 1, 1)
-        pg.addWidget(SimButton(model, "cancel", "✕", ed), 1, 2)
-        pg.addWidget(SimButton(model, "knob_l", "⟲ ◀", ed), 2, 0)
-        pg.addWidget(SimButton(model, "knob_r", "▶ ⟳", ed), 2, 2)
-        body.addWidget(pad)
+        left = QVBoxLayout()
+        body.addLayout(left)
+        left.addWidget(KeypadWidget(model, self.edit_assignment))
+        left.addWidget(QLabel(
+            "drawn to the real AU05 — press the drawing to simulate, double-click to edit.<br>"
+            "icon↔Control mapping assumed <b>⏻ = Voice · ⊘ = ✓ Confirm · ⊗ = ✕ Cancel</b>;<br>"
+            "the long ⊗ end-bar is <b>unmapped in v1</b> — press it on your unit: is it a key?"))
+        left.addStretch(1)
 
         ovl = QVBoxLayout()
         body.addLayout(ovl, 1)
-        ovl.addWidget(QLabel("<b>Assignments</b> — single click simulates, double-click edits"))
+        ovl.addWidget(QLabel("<b>Assignments</b> — single click on the drawing simulates, double-click edits"))
         self.ov_rows = {}
         for key, label in CONTROLS:
             row = QHBoxLayout()
