@@ -54,20 +54,20 @@ pkgfile="${pkgname}-${pkgver}-${pkgrel}-x86_64.pkg.tar.zst"
 [[ -f $pkgfile ]] || { echo "expected artifact $pkgfile not produced" >&2; exit 1; }
 
 echo "==> verifying package structure"
-files=$(pacman -Qlp "$pkgfile" | sed 's|^[^ ]* ||')
+files=$(pacman -Qlp "$pkgfile" | sed 's|^[^ ]* ||')   # keep the leading slash
 need=(
-  usr/lib/vibekey/bin/vibekeyd
-  usr/lib/vibekey/bin/vibekey-config
-  usr/lib/vibekey/actions.json
-  usr/lib/vibekey/panel/panel.py
-  usr/bin/vibekey-panel
-  usr/lib/systemd/user/vibekeyd.service
-  usr/lib/udev/rules.d/70-ulanzi-vibekey.rules
-  usr/lib/sysusers.d/vibekey.conf
-  usr/share/applications/vibekey-panel.desktop
-  usr/share/icons/hicolor/32x32/apps/vibekey.png
-  usr/share/icons/hicolor/scalable/apps/vibekey.svg
-  usr/share/licenses/vibekey/LICENSE
+  /usr/lib/vibekey/bin/vibekeyd
+  /usr/lib/vibekey/bin/vibekey-config
+  /usr/lib/vibekey/actions.json
+  /usr/lib/vibekey/panel/panel.py
+  /usr/bin/vibekey-panel
+  /usr/lib/systemd/user/vibekeyd.service
+  /usr/lib/udev/rules.d/70-ulanzi-vibekey.rules
+  /usr/lib/sysusers.d/vibekey.conf
+  /usr/share/applications/vibekey-panel.desktop
+  /usr/share/icons/hicolor/32x32/apps/vibekey.png
+  /usr/share/icons/hicolor/scalable/apps/vibekey.svg
+  /usr/share/licenses/vibekey/LICENSE
 )
 for f in "${need[@]}"; do
   echo "$files" | grep -qx "$f" || { echo "MISSING in package: $f" >&2; exit 1; }
