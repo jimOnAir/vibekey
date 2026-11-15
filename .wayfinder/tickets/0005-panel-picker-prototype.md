@@ -31,11 +31,14 @@ window+tray, picker grouping, how "preview" is communicated.
 **Variant A ("drawn device") won** — owner's pick after live A/B/C flipping
 ("looks good"). Design elements validated for the spec:
 
-- **Panel = a window**; left half draws the real AU05 — horizontal aluminium
-  bar, **knob over the mic/speaker end** (grip notches, mic slots, *Vibekey*
-  logo), **three round-capped keys (🎙 ✓ ✕) in square housings**, long ⊗
-  end-bar — with transparent interactive zones exactly over the art. Single
-  click on the drawing simulates (zone glows), double-click edits.
+- **Panel = a window**; left half draws the real AU05 per product/build photos
+  — horizontal aluminium bar; **speaker mesh + *Ulanzi* logo + five mic slots**
+  at the far end; **aluminium knob with grip ticks and a recessed ring groove
+  (the LED ring lives there)**; **three square white keycaps** (mic / accept /
+  cancel); strap hole at the edge — transparent interactive zones exactly over
+  the art. Single click on the drawing simulates (zone glows), double-click
+  edits. (First takes drew round caps + a phantom "⊗ end-bar"; corrected
+  against close-up photos — no 4th key exists.)
 - **Header strip**: current Knob mode chip · Ring position · battery — the
   always-visible mode indicator worked; no need for C's segmented buttons.
 - **Bottom status line narrates every event** with the Preview distinction
@@ -44,11 +47,10 @@ window+tray, picker grouping, how "preview" is communicated.
   mode-cycle vs Enter pair.
 - **Picker = grouped-tile dialog + custom command / key-combo fields.**
 - **Button icon language: Ulanzi-style line art matching the physical caps** —
-  each round keycap's icon is a small central glyph (**mic capsule / check /
+  each square keycap's icon is a small central glyph (**mic capsule / slash /
   cross**) framed by **two open arcs** (split circle, gaps top/bottom), seen
-  in product-photo close-ups; the long end-bar carries the same arc-wrapped
-  cross motif; knob turn = open-ring ↺ ↻ arrows. Uniform graphite strokes,
-  rounded caps/join, invert to white on press. Renderers
+  in product-photo close-ups; knob turn = open-ring ↺ ↻ arrows. Uniform
+  graphite strokes, rounded caps/join, invert to white on press. Renderers
   `draw_mic/draw_check/draw_cross/draw_turn` + `_arcs()` + `line_icon()` in
   `prototype_panel_picker.py` (verified via offscreen grabs,
   `preview_keypad.py`).
@@ -65,7 +67,9 @@ window+tray, picker grouping, how "preview" is communicated.
   stays config-editable, header shows the current one).
 
 **Still open (carried, not blocking the spec):** the physical icon↔Control
-mapping and whether the ⊗ end-bar is a 4th key — the prototype grew a **probe**
-(pill → *probe*: logs real X key events to `/tmp/opencode/au05-probe.log`);
-deferred to an implementation-time physical session, where it also settles the
-existing *firmware-variant* fog item.
+mapping (which cap is Enter vs Escape) — the prototype grew a **probe** (pill →
+*probe*: logs real X key events to `/tmp/opencode/au05-probe.log`); deferred to
+an implementation-time physical session, where it also settles the existing
+*firmware-variant* fog item. The "is the ⊗ end-bar a 4th key?" question is
+**closed** — build-photo close-ups show exactly three square keycaps; the
+"bar" was perspective.

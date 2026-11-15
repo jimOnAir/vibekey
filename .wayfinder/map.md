@@ -58,13 +58,16 @@ sessions; nothing on this map builds it.
   running port with device access — probably graduates off-map as an
   implementation-time probe, not a decision here. A ready-made probe exists:
   the prototype's *probe* window (`prototype/panel-picker`, pill → probe) logs
-  real X key events — it also answers whether the ⊗ end-bar is a 4th key and
-  the physical icon↔Control mapping.
+  real X key events — it also settles the physical icon↔Control mapping.
+  (The "⊗ end-bar" question is closed: build photos show only 3 square caps —
+  no 4th key.)
 - **KDE tray autostart UX for the panel** (the daemon's autostart is settled;
   the panel's is not).
 - **Non-US keyboard layout handling** for key-combo assignments.
 - **Vendor-channel capabilities beyond battery** reading — worth anything else
-  on `0x55`/vendor reports is unknown until the port audit lands.
+  on `0x55`/vendor reports; product/build photos show the knob in a recessed
+  **RGB LED ring** — if driveable, Knob mode could announce *on the device*
+  (mode → ring colour), closing the "no screen to show the mode" gap.
 - **Panel↔daemon IPC upgrade** if file-based state (`state.json`, preview
   heartbeat) proves annoying in the prototype.
 
