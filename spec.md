@@ -111,8 +111,9 @@ Config dir `~/.config/vibekey/`, runtime dir `$XDG_RUNTIME_DIR/vibekey/`:
 | `config.json` | only via `vibekey-config` (atomic replace) | Daemon (0.5 s mtime poll + SIGHUP), Panel | schema §4 |
 | `seen.json` | Daemon (per press) | Panel | learned raw ids for Alias UX |
 | `actions.json` (catalogue) | package (`/usr/lib/vibekey/actions.json`) | Daemon (seed + behavior-presets), Panel (picker) | resolved relative to the package dir, **not** `bin/`-relative — a wrong path silently no-ops first-run seeding (risk R6) |
-| `state.json` | Daemon only, rewritten in place on every event | Panel (`QFileSystemWatcher` + 1 s/5 s poll) | fields: upstream set (`version,pid,connected,access,grabbed,mouse_passthrough,preview,knob_position,device,battery,last,events,error,updated`) **plus** `knob_mode` (§5.3) and `lighting` incl. `device_mode`: `0|1|2|"unknown"|"disabled"` (§5.5) |
+| `state.json` | Daemon only, rewritten in place on every event | Panel (`QFileSystemWatcher` + 1 s/5 s poll) | fields: upstream set (`version,pid,connected,access,grabbed,mouse_passthrough,preview,knob_position,device,battery,last,events,error,updated`) **plus** `knob_mode` (§5.3), `last_error` (§5.3 failure surface) and `lighting` incl. `device_mode`: `0|1|2|"unknown"|"disabled"`, `pending_mode`, `last_error` (§5.5) |
 | `preview` | Panel (`open` every 2 s while shown, `closed` on hide) | Daemon (trusts `open` for 6 s) | while active: events are reported, nothing runs |
+| `manage_lights` | Panel (one-shot `"manage"`) | Daemon (consumes + unlinks on its 0.5 s poll) | the consented Manage lights request (§5.5) — the Panel never touches the vendor channel |
 
 Preview semantics: with Preview on, the Daemon still publishes the event
 (`last` with the would-be action name) but suppresses the Assignment and the

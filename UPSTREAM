@@ -1,0 +1,4 @@
+Pinned upstream source of this port:
+  repo:    https://github.com/jimmibram/vibekey-driver  (MIT)
+  commit:  41ba904b2ea406eaf5c50d9bb4fb9e195bb8b56a
+Audited against this system in the research/upstream-port-audit branch.

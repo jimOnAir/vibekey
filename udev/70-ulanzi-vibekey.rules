@@ -1,0 +1,6 @@
+# Package-owned rule for the AU05 Dongle (spec §9, ticket 8): static group
+# grant — deterministic at node creation across the Dongle's watchdog
+# re-enumerations; uaccess was rejected for its boot/greeter race (ticket 1).
+# Both subsystems mandatory: hidraw = reports + vendor writes, input = the Grab.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="fff1", ATTRS{idProduct}=="00dd", MODE="0660", GROUP="vibekey"
+SUBSYSTEM=="input",  ATTRS{idVendor}=="fff1", ATTRS{idProduct}=="00dd", MODE="0660", GROUP="vibekey"

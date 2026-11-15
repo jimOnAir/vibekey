@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=vibekey Panel
+GenericName=AU05 control surface
+Comment=Configure the Ulanzi AU05 keypad (vibekey)
+Exec=vibekey-panel
+Icon=vibekey
+Terminal=false
+Categories=Utility;Settings;
+StartupWMClass=vibekey-panel

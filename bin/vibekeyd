@@ -1,0 +1,1820 @@
+#!/usr/bin/env python3
+"""vibekeyd: Ulanzi Vibekey (AU05) driver for Manjaro KDE (X11) — vibekey port.
+
+Ported from jimmibram/vibekey-driver (MIT, upstream @ 41ba904b); buildable
+spec: spec.md at the repo root. What it does
+  * Finds the Dongle (USB fff1:00dd) and holds both of its raw HID channels
+    open. The Dongle's watchdog re-enumerates it; holding the channels is the
+    cure — presses in a reboot window vanish, which is normal.
+  * Reads the standard HID reports straight from hidraw, so the Voice Control
+    is seen too: from the factory it sends the HID "ErrorRollOver" usage
+    (0x01), which the kernel never turns into a key press. Other firmware
+    sends Super+H instead.
+  * EVIOCGRABs the device's evdev nodes so factory keystrokes never reach
+    X11/libinput — every one except the mouse-named node, whose wheel reports
+    pass through while the Knob mode is `scroll` (spec §2). Every Control runs
+    its Assignment from ~/.config/vibekey/config.json instead.
+  * Key combos fire as `xdotool key` (one-shot); Dictation brackets the chord
+    with `xdotool keydown/keyup` against handy's Tauri backend (spec §2.2).
+  * Behaviors (spec §5): dictation.ptt, session.next/prev/focus/interrupt,
+    orca.worktree.next/prev, sessions.turn — Daemon-side Presets.
+  * Owns the device's indicator lights through a single-writer lighting module
+    (TEA-encrypted vendor frames on interface 3; spec §5.5), including the
+    Device lighting mode policy (guest + consented Manage lights).
+  * Polls the battery and publishes everything the Panel needs to
+    $XDG_RUNTIME_DIR/vibekey/state.json.
+
+Only the Python standard library is used.
+
+Usage: vibekeyd [--probe] [--no-grab] [--no-battery] [--no-lighting]
+  --probe        also print every decoded control event to stdout
+  --no-grab      leave the evdev nodes alone (keystrokes reach apps as well)
+  --no-battery   never talk to the vendor channel
+  --no-lighting  skip all lighting traffic (device-mode policy, ring, blinks)
+"""
+
+import base64
+import errno
+import fcntl
+import json
+import os
+import select
+import signal
+import struct
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+VENDOR_ID = 0xFFF1
+PRODUCT_ID = 0x00DD
+PRODUCT_NAME = "Ulanzi Vibekey"
+
+CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "vibekey")
+CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
+SEEN_PATH = os.path.join(CONFIG_DIR, "seen.json")
+PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # /usr/lib/vibekey
+ACTIONS_PATH = os.path.join(PACKAGE_DIR, "actions.json")  # catalogue: seed + knob_turn + behaviors
+RUNTIME_DIR = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "vibekey")
+STATE_PATH = os.path.join(RUNTIME_DIR, "state.json")
+LOCK_PATH = os.path.join(RUNTIME_DIR, "lock")
+MANAGE_LIGHTS_PATH = os.path.join(RUNTIME_DIR, "manage_lights")  # Panel's consented Manage lights request
+
+EVIOCGRAB = 0x40044590
+INPUT_EVENT_SIZE = struct.calcsize("llHHi")
+
+BATTERY_INTERVAL = 60.0
+PREVIEW_PATH = os.path.join(RUNTIME_DIR, "preview")   # the Panel heartbeats "open" here while shown
+PREVIEW_MAX_AGE = 6.0
+RESCAN_INTERVAL = 0.7  # the Dongle reboots on its watchdog until something holds the channels open
+CONFIG_POLL = 0.5
+
+KNOB_MODES_DEFAULT = ["scroll", "sessions", "volume"]
+LONG_PRESS_SECONDS = 0.4          # knob: press = Knob-mode cycle, long-press = Enter (spec §5.3)
+DICTATION_CHORD_DEFAULT = "ctrl+alt+space"   # handy's Linux default; the Preset owns its chord
+
+# --------------------------------------------------------------------------
+# HID usage names
+# --------------------------------------------------------------------------
+
+KEYBOARD_USAGES = {0x01: "Voice"}  # ErrorRollOver: what the Voice Control sends from the factory
+for _i, _c in enumerate("abcdefghijklmnopqrstuvwxyz"):
+    KEYBOARD_USAGES[0x04 + _i] = _c.upper()
+for _i, _c in enumerate("1234567890"):
+    KEYBOARD_USAGES[0x1E + _i] = _c
+KEYBOARD_USAGES.update({
+    0x28: "Enter", 0x29: "Escape", 0x2A: "Backspace", 0x2B: "Tab", 0x2C: "Space",
+    0x2D: "Minus", 0x2E: "Equal", 0x2F: "LeftBracket", 0x30: "RightBracket",
+    0x31: "Backslash", 0x32: "Hash", 0x33: "Semicolon", 0x34: "Apostrophe",
+    0x35: "Grave", 0x36: "Comma", 0x37: "Period", 0x38: "Slash", 0x39: "CapsLock",
+    0x46: "PrintScreen", 0x47: "ScrollLock", 0x48: "Pause", 0x49: "Insert",
+    0x4A: "Home", 0x4B: "PageUp", 0x4C: "Delete", 0x4D: "End", 0x4E: "PageDown",
+    0x4F: "Right", 0x50: "Left", 0x51: "Down", 0x52: "Up", 0x53: "NumLock",
+    0x54: "KP/", 0x55: "KP*", 0x56: "KP-", 0x57: "KP+", 0x58: "KPEnter",
+    0x62: "KP0", 0x63: "KP.", 0x65: "Menu", 0x66: "Power", 0x74: "Execute",
+    0x75: "Help", 0x76: "Menu", 0x77: "Select", 0x78: "Stop", 0x79: "Again",
+    0x7A: "Undo", 0x7B: "Cut", 0x7C: "Copy", 0x7D: "Paste", 0x7E: "Find",
+    0x7F: "Mute", 0x80: "VolumeUp", 0x81: "VolumeDown",
+})
+for _i in range(12):
+    KEYBOARD_USAGES[0x3A + _i] = "F%d" % (_i + 1)
+    KEYBOARD_USAGES[0x68 + _i] = "F%d" % (_i + 13)
+for _i in range(9):
+    KEYBOARD_USAGES[0x59 + _i] = "KP%d" % (_i + 1)
+
+MODIFIER_BITS = [(0x01, "ctrl"), (0x02, "shift"), (0x04, "alt"), (0x08, "super"),
+                 (0x10, "ctrl"), (0x20, "shift"), (0x40, "alt"), (0x80, "super")]
+
+CONSUMER_USAGES = {
+    0x00B5: "NextTrack", 0x00B6: "PreviousTrack", 0x00B7: "Stop", 0x00B8: "Eject",
+    0x00CD: "PlayPause", 0x00E2: "Mute", 0x00E9: "VolumeUp", 0x00EA: "VolumeDown",
+    0x006F: "BrightnessUp", 0x0070: "BrightnessDown", 0x0183: "MediaPlayer",
+    0x018A: "Mail", 0x0192: "Calculator", 0x0194: "FileBrowser", 0x0221: "Search",
+    0x0223: "Browser", 0x0224: "Back", 0x0225: "Forward", 0x0226: "StopLoading",
+    0x0227: "Refresh", 0x022A: "Bookmarks",
+}
+
+# The six physical Controls and the HID usages they send from the factory.
+# The Voice Control has been seen as ErrorRollOver and as Super+H (Windows
+# voice typing); knob rotation as Right/Backspace keys and as mouse wheel
+# ticks. Firmware that turns as wheel ticks sends Backspace for the knob press
+# instead, which Daemon.slot_for tells apart.
+DEFAULT_SLOTS = {
+    "kbd:0x01": "key1",
+    "kbd:super+0x0b": "key1",
+    "kbd:0x28": "key2",
+    "kbd:0x29": "key3",
+    "kbd:0x46": "knob",
+    "kbd:0x4f": "knob_right",
+    "wheel:cw": "knob_right",
+    "kbd:0x2a": "knob_left",
+    "wheel:ccw": "knob_left",
+}
+
+SLOT_LABELS = {
+    "key1": "Voice key",
+    "key2": "Confirm key",
+    "key3": "Cancel key",
+    "knob": "Knob press",
+    "knob_right": "Knob right",
+    "knob_left": "Knob left",
+}
+
+SLOT_ORDER = ["key1", "key2", "key3", "knob", "knob_right", "knob_left"]
+
+# culprit keycap per slot for the failure blink (spec §5.4); knob/turn have no cap.
+LED_INDEX = {"key1": 0, "key2": 1, "key3": 2}
+
+
+def log(*parts):
+    print("vibekeyd:", *parts, file=sys.stderr, flush=True)
+
+
+# --------------------------------------------------------------------------
+# TEA transport for the vendor channel (interface 3, report 0x55)
+# --------------------------------------------------------------------------
+
+TEA_KEY = struct.unpack("<IIII", bytes.fromhex("cabaa5ca6d8a2abcba9e5acaca8bb89b"))
+TEA_DELTA = 0x9E3779B9
+MASK32 = 0xFFFFFFFF
+
+
+def _tea_encrypt_block(block):
+    v0, v1 = struct.unpack("<II", block)
+    k0, k1, k2, k3 = TEA_KEY
+    total = 0
+    for _ in range(32):
+        total = (total + TEA_DELTA) & MASK32
+        v0 = (v0 + ((((v1 << 4) & MASK32) + k0) ^ ((v1 + total) & MASK32) ^ ((v1 >> 5) + k1))) & MASK32
+        v1 = (v1 + ((((v0 << 4) & MASK32) + k2) ^ ((v0 + total) & MASK32) ^ ((v0 >> 5) + k3))) & MASK32
+    return struct.pack("<II", v0, v1)
+
+
+def _tea_decrypt_block(block):
+    v0, v1 = struct.unpack("<II", block)
+    k0, k1, k2, k3 = TEA_KEY
+    total = (TEA_DELTA * 32) & MASK32
+    for _ in range(32):
+        v1 = (v1 - ((((v0 << 4) & MASK32) + k2) ^ ((v0 + total) & MASK32) ^ ((v0 >> 5) + k3))) & MASK32
+        v0 = (v0 - ((((v1 << 4) & MASK32) + k0) ^ ((v1 + total) & MASK32) ^ ((v1 >> 5) + k1))) & MASK32
+        total = (total - TEA_DELTA) & MASK32
+    return struct.pack("<II", v0, v1)
+
+
+def tea_encrypt(plain64):
+    return b"".join(_tea_encrypt_block(plain64[i:i + 8]) for i in range(0, 64, 8))
+
+
+def tea_decrypt(cipher64):
+    return b"".join(_tea_decrypt_block(cipher64[i:i + 8]) for i in range(0, 64, 8))
+
+
+def vendor_frame(payload):
+    """A 64-byte hidraw write: report ID 0x55 plus the first 63 encrypted bytes."""
+    plain = bytes(payload) + bytes(64 - len(payload))
+    return b"\x55" + tea_encrypt(plain)[:63]
+
+
+def vendor_decode(report):
+    """Decrypt an incoming 0x55 report. The 64th cipher byte never crosses the wire."""
+    data = report[1:] if report[:1] == b"\x55" else report
+    if len(data) < 63:
+        return None
+    return tea_decrypt(bytes(data[:63]) + b"\x00")
+
+
+BATTERY_REQUEST = bytes([0x01, 0x01, 0x02, 0x01])
+
+# --------------------------------------------------------------------------
+# Files: config, seen controls, published state
+# --------------------------------------------------------------------------
+
+
+def read_json(path, fallback):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else fallback
+    except (OSError, ValueError):
+        return fallback
+
+
+def write_json_atomic(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp.%d" % os.getpid()
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.replace(tmp, path)
+
+
+def write_json_inplace(path, data):
+    """One write() into a truncated file. Readers that watch the path keep
+    their watch (no rename), and the payload is small enough that a reader
+    practically never sees it half-written; they retry on a parse error."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    blob = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC, 0o600)
+    try:
+        os.write(fd, blob)
+    finally:
+        os.close(fd)
+
+
+def preset_entry(preset, tag, fields):
+    """The config entry a catalogue preset stands for: the fields are copied
+    (the same shape the Panel writes) so the daemon never needs the catalogue
+    for command/keys presets once the config exists. Behavior presets are the
+    deliberate exception (spec §4.2): they carry `behavior` (+ `dir`)."""
+    entry = {"preset": tag, "label": str(preset.get("label") or "")}
+    for field in fields:
+        value = preset.get(field)
+        if isinstance(value, str) and value:
+            entry[field] = value
+    return entry
+
+
+ENTRY_FIELDS = ("behavior", "dir", "command", "keys", "release_command", "release_keys", "scroll")
+
+
+def default_buttons(catalogue):
+    """Buttons + knob_modes for a first-run config, from the "defaults" block
+    of actions.json: a preset id per editable slot, plus "knob_modes" naming
+    the ordered turn modes (spec §7)."""
+    defaults = catalogue.get("defaults")
+    if not isinstance(defaults, dict):
+        return {}, list(KNOB_MODES_DEFAULT)
+    presets = {p["id"]: p for p in catalogue.get("presets") or [] if isinstance(p, dict) and p.get("id")}
+    buttons = {}
+    for slot in ("key1", "key2", "key3"):
+        preset_id = defaults.get(slot)
+        if slot in SLOT_LABELS and preset_id in presets:
+            buttons[slot] = preset_entry(presets[preset_id], str(preset_id), ENTRY_FIELDS)
+    modes = defaults.get("knob_modes")
+    if not (isinstance(modes, list) and modes):
+        modes = list(KNOB_MODES_DEFAULT)
+    return buttons, [m for m in modes if isinstance(m, str)]
+
+
+def seed_config(path=CONFIG_PATH, actions_path=ACTIONS_PATH):
+    """Write the first-run config when none exists, so a freshly connected
+    keypad does something useful before the Panel is ever opened. A config the
+    user emptied on purpose is left alone: only a missing file is seeded."""
+    if os.path.exists(path):
+        return False
+    catalogue = read_json(actions_path, {})
+    buttons, knob_modes = default_buttons(catalogue)
+    if not buttons:
+        return False
+    try:
+        write_json_atomic(path, {"grab": True, "battery": True, "aliases": {},
+                                 "knob_modes": knob_modes, "buttons": buttons})
+    except OSError as error:
+        log("could not write the default config:", error)
+        return False
+    log("wrote default assignments to", path, "for", ", ".join(sorted(buttons)))
+    return True
+
+
+class Config:
+    def __init__(self, path):
+        self.path = path
+        self.mtime = None
+        self.data = {}
+        seed_config(path)
+        self.reload(force=True)
+
+    def reload(self, force=False):
+        try:
+            mtime = os.stat(self.path).st_mtime_ns
+        except OSError:
+            mtime = None
+        if not force and mtime == self.mtime:
+            return False
+        self.mtime = mtime
+        self.data = read_json(self.path, {})
+        return True
+
+    @property
+    def battery(self):
+        return self.data.get("battery", True) is not False
+
+    @property
+    def knob_modes(self):
+        modes = self.data.get("knob_modes")
+        if isinstance(modes, list) and [m for m in modes if isinstance(m, str) and m]:
+            return [m for m in modes if isinstance(m, str) and m]
+        return list(KNOB_MODES_DEFAULT)
+
+    @property
+    def lighting(self):
+        block = self.data.get("lighting")
+        merged = {"mode_ring": True, "fail_blink": True, "low_battery": True,
+                  "brightness": 1.0,
+                  "patterns": {"Scroll": "off", "Sessions": "solid:8", "Volume": "breathe:8"}}
+        if isinstance(block, dict):
+            for key in ("mode_ring", "fail_blink", "low_battery"):
+                merged[key] = block.get(key) is not False
+            try:
+                merged["brightness"] = min(1.0, max(0.0, float(block.get("brightness", 1.0))))
+            except (TypeError, ValueError):
+                pass
+            if isinstance(block.get("patterns"), dict):
+                merged["patterns"].update({k: str(v) for k, v in block["patterns"].items()})
+        return merged
+
+    @property
+    def orca_cli(self):
+        value = self.data.get("orca_cli")
+        return value if isinstance(value, str) and value else None
+
+    def aliased(self, raw_id):
+        """True when the user has learned this control as one of the six."""
+        aliases = self.data.get("aliases")
+        if not isinstance(aliases, dict):
+            return False
+        slot = aliases.get(raw_id)
+        return isinstance(slot, str) and slot in SLOT_LABELS
+
+    def slot_for(self, raw_id):
+        if self.aliased(raw_id):
+            return self.data["aliases"][raw_id]
+        return DEFAULT_SLOTS.get(raw_id)
+
+    def button(self, raw_id, slot):
+        buttons = self.data.get("buttons")
+        if not isinstance(buttons, dict):
+            return None
+        entry = buttons.get(raw_id)
+        if not isinstance(entry, dict) and slot:
+            entry = buttons.get(slot)
+        return entry if isinstance(entry, dict) else None
+
+
+class Seen:
+    """Controls the device has ever sent, so the Panel can list them."""
+
+    def __init__(self, path):
+        self.path = path
+        self.data = read_json(path, {})
+        if not isinstance(self.data.get("controls"), dict):
+            self.data["controls"] = {}
+
+    def has(self, *raw_ids):
+        """True when the device has ever sent one of these controls."""
+        controls = self.data["controls"]
+        return any(isinstance(controls.get(raw_id), dict) for raw_id in raw_ids)
+
+    def note(self, raw_id, slot, label):
+        controls = self.data["controls"]
+        entry = controls.get(raw_id)
+        if not isinstance(entry, dict):
+            entry = {"count": 0}
+        entry["count"] = int(entry.get("count", 0)) + 1
+        entry["last"] = time.time()
+        entry["slot"] = slot
+        entry["label"] = label
+        controls[raw_id] = entry
+        try:
+            write_json_atomic(self.path, self.data)
+        except OSError as error:
+            log("could not save seen.json:", error)
+
+
+class State:
+    def __init__(self, path):
+        self.path = path
+        self.data = {
+            "version": 1,
+            "pid": os.getpid(),
+            "connected": False,
+            "access": "absent",
+            "grabbed": False,
+            "mouse_passthrough": False,
+            "preview": False,
+            "knob_position": 0,
+            "knob_mode": None,
+            "device": None,
+            "battery": None,
+            "last": None,
+            "events": 0,
+            "error": "",
+            "lighting": {"device_mode": "unknown", "last_error": ""},
+            "updated": 0,
+        }
+        self.publish()
+
+    def set(self, **fields):
+        self.data.update(fields)
+        self.publish()
+
+    def set_lighting(self, **fields):
+        lighting = dict(self.data.get("lighting") or {})
+        lighting.update(fields)
+        self.set(lighting=lighting)
+
+    def publish(self):
+        self.data["updated"] = time.time()
+        try:
+            write_json_inplace(self.path, self.data)
+        except OSError as error:
+            log("could not write state:", error)
+
+
+# --------------------------------------------------------------------------
+# Actions: xdotool injection adapter (spec §2.2, replaces wtype_argv)
+# --------------------------------------------------------------------------
+
+XDO_MODIFIERS = {
+    "ctrl": "ctrl", "control": "ctrl", "shift": "shift", "alt": "alt",
+    "super": "super", "meta": "super", "win": "super", "logo": "super",
+    "altgr": "ISO_Level3_Shift",
+}
+XDO_KEYSYMS = {  # X keysym names pass through; these are the friendly aliases.
+    "enter": "Return", "return": "Return", "esc": "Escape", "escape": "Escape",
+    "space": "space", "tab": "Tab", "backspace": "BackSpace", "delete": "Delete",
+    "del": "Delete", "insert": "Insert", "home": "Home", "end": "End",
+    "pageup": "Prior", "pagedown": "Next", "up": "Up", "down": "Down",
+    "left": "Left", "right": "Right", "print": "Print", "menu": "Menu",
+    "plus": "plus", "minus": "minus", "comma": "comma", "period": "period",
+    "slash": "slash", "backslash": "backslash", "semicolon": "semicolon",
+    "apostrophe": "apostrophe", "grave": "grave", "bracketleft": "bracketleft",
+    "bracketright": "bracketright", "equal": "equal",
+}
+
+
+def normalize_combo(combo):
+    """'ctrl+shift+t' -> xdotool keystroke string, or None when unusable."""
+    parts = [p.strip() for p in str(combo).replace(" ", "").split("+") if p.strip()]
+    if not parts:
+        return None
+    key = parts[-1]
+    mods = []
+    for part in parts[:-1]:
+        mod = XDO_MODIFIERS.get(part.lower())
+        if mod is None:
+            return None
+        mods.append(mod)
+    lowered = key.lower()
+    if lowered in XDO_KEYSYMS:
+        keysym = XDO_KEYSYMS[lowered]
+    elif len(lowered) >= 2 and lowered[0] == "f" and lowered[1:].isdigit():
+        keysym = "F" + lowered[1:]
+    else:
+        keysym = key
+    return "+".join(mods + [keysym])
+
+
+# live children, reaped in the main loop so spawn() failures stop being silent
+# (port-audit R3): every non-zero exit gets logged and can be surfaced.
+_children = []
+
+
+def spawn(argv, shell=False):
+    try:
+        proc = subprocess.Popen(
+            ["bash", "-c", argv] if shell else argv,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True,
+        )
+        if len(_children) < 64:
+            _children.append((proc, argv))
+        return True
+    except OSError as error:
+        log("could not run", argv, error)
+        return False
+
+
+def reap_children():
+    still = []
+    for proc, argv in _children:
+        code = proc.poll()
+        if code is None:
+            still.append((proc, argv))
+        elif code != 0:
+            log("command failed (exit %d):" % code, argv)
+    _children[:] = still
+
+
+def notify(title, body):
+    spawn(["notify-send", "-a", "vibekey", title, body])
+
+
+def xdo_key(combo):
+    """Inject a one-shot combo; True when it was well-formed."""
+    stroke = normalize_combo(combo)
+    if not stroke:
+        log("unknown key combo:", combo)
+        return False
+    spawn(["xdotool", "key", stroke])
+    return True
+
+
+def xdo_hold(combo, down):
+    """Bracket a hold: keydown on press, keyup on release."""
+    stroke = normalize_combo(combo)
+    if not stroke:
+        log("unknown key combo:", combo)
+        return False
+    spawn(["xdotool", "keydown" if down else "keyup", stroke])
+    return True
+
+
+# --------------------------------------------------------------------------
+# OpenCode service client (spec §5.1: v2 /api/*, service.json discovery)
+# --------------------------------------------------------------------------
+
+class OpenCode:
+    SERVICE_FILE = os.path.join(
+        os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
+        "opencode", "service.json")
+    CACHE_TTL = 5.0
+
+    def __init__(self):
+        self.cached = None      # (url, password)
+        self.cached_at = 0.0
+
+    def _discover(self, force=False):
+        now = time.monotonic()
+        if not force and self.cached and now - self.cached_at < self.CACHE_TTL:
+            return self.cached
+        data = read_json(self.SERVICE_FILE, {})
+        url, password = data.get("url"), data.get("password")
+        if isinstance(url, str) and isinstance(password, str):
+            self.cached, self.cached_at = (url, password), now
+            return self.cached
+        self.cached, self.cached_at = None, now
+        return None
+
+    def _request(self, method, path, body=None, _retried=False):
+        target = self._discover(force=_retried)
+        if not target:
+            return None
+        url, password = target
+        req = urllib.request.Request(url.rstrip("/") + path, method=method)
+        token = ("%s:%s" % ("opencode", password)).encode("utf-8")
+        req.add_header("Authorization", "Basic " + base64.b64encode(token).decode())
+        if body is not None:
+            req.add_header("Content-Type", "application/json")
+            data = json.dumps(body).encode()
+        else:
+            data = None
+        try:
+            with urllib.request.urlopen(req, data, timeout=3.0) as resp:
+                payload = resp.read()
+                return json.loads(payload) if payload else {}
+        except urllib.error.HTTPError as error:
+            if error.code == 401 and not _retried:
+                return self._request(method, path, body, _retried=True)  # one re-read + retry
+            return None
+        except (urllib.error.URLError, OSError, ValueError):
+            return None
+
+    def root_sessions(self):
+        """Root Session rows, newest first (cursor-paginated session.list)."""
+        rows, cursor = [], None
+        for _ in range(10):
+            path = "/api/session?parentID=null&order=desc&limit=100"
+            if cursor:
+                path += "&cursor=" + urllib.parse.quote(str(cursor), safe="")
+            reply = self._request("GET", path)
+            if not isinstance(reply, dict):
+                return None          # None = service unreachable (after the retry)
+            rows.extend(reply.get("data") or [])
+            cursor = (reply.get("cursor") or {}).get("next") if isinstance(reply.get("cursor"), dict) else reply.get("cursor")
+            if not cursor:
+                break
+        return rows
+
+    def interrupt(self, session_id):
+        reply = self._request("POST", "/api/session/%s/interrupt" % session_id)
+        return isinstance(reply, dict)
+
+
+# --------------------------------------------------------------------------
+# Orca CLI client (spec §5.3: absolute path, re-list handles per fire)
+# --------------------------------------------------------------------------
+
+class Orca:
+    SHIM = os.path.join(os.path.expanduser("~"), ".config", "orca", "linux-orca-cli-shim", "orca")
+    INSTALLED = "/opt/stably-orca/resources/bin/orca-ide"
+
+    def __init__(self, config):
+        self.config = config
+
+    @property
+    def binary(self):
+        # never bare `orca` — the GNOME screen reader has that name (ticket 4)
+        for candidate in (self.config.orca_cli, self.SHIM, self.INSTALLED):
+            if candidate and os.access(candidate, os.X_OK):
+                return candidate
+        return None
+
+    def running(self):
+        reply = self._run(["status", "--json"])
+        return bool(reply)
+
+    def _run(self, args, timeout=5.0):
+        binary = self.binary
+        if not binary:
+            return None
+        try:
+            proc = subprocess.run([binary] + args + ["--json"], capture_output=True,
+                                  timeout=timeout, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if proc.returncode != 0:
+            return None
+        try:
+            return json.loads(proc.stdout.decode("utf-8", errors="replace"))
+        except ValueError:
+            return None
+
+    def terminals(self):
+        reply = self._run(["terminal", "list"])
+        rows = reply.get("data") if isinstance(reply, dict) else None
+        return rows if isinstance(rows, list) else (reply if isinstance(reply, list) else [])
+
+    def switch_terminal(self, handle):
+        return self._run(["terminal", "switch", "--terminal", handle]) is not None
+
+    def send_interrupt(self, handle):
+        return self._run(["terminal", "send", "--terminal", handle, "--interrupt"]) is not None
+
+    def worktrees(self):
+        reply = self._run(["worktree", "list"])
+        rows = reply.get("data") if isinstance(reply, dict) else None
+        return rows if isinstance(rows, list) else (reply if isinstance(reply, list) else [])
+
+    def activate_worktree(self, key):
+        reply = self._run(["worktree", "activate", "--worktree", "identity:" + key])
+        return isinstance(reply, dict) and reply.get("activated") is True
+
+
+# --------------------------------------------------------------------------
+# Window helpers (X11 raise paths, spec §5.3)
+# --------------------------------------------------------------------------
+
+def wmctrl_windows():
+    """[(id, pid, title)] from `wmctrl -lp`."""
+    try:
+        proc = subprocess.run(["wmctrl", "-lp"], capture_output=True, timeout=3.0, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    out = []
+    for line in proc.stdout.decode("utf-8", errors="replace").splitlines():
+        parts = line.split(None, 4)
+        if len(parts) >= 5:
+            try:
+                out.append((parts[0], int(parts[3]), parts[4]))
+            except ValueError:
+                pass
+    return out
+
+
+def raise_title(needle):
+    for wid, _pid, title in wmctrl_windows():
+        if needle.lower() in title.lower():
+            spawn(["wmctrl", "-i", "-a", wid])
+            return True
+    return False
+
+
+def raise_pids(pids):
+    for wid, pid, _title in wmctrl_windows():
+        if pid in pids:
+            spawn(["wmctrl", "-i", "-a", wid])
+            return True
+    return False
+
+
+def pids_named(*names):
+    pids = set()
+    for name in names:
+        try:
+            proc = subprocess.run(["pgrep", "-x", name], capture_output=True, timeout=2.0, check=False)
+            pids.update(int(line) for line in proc.stdout.split() if line.strip().isdigit())
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return pids
+
+
+def focused_window_title():
+    try:
+        proc = subprocess.run(["xdotool", "getactivewindow", "getwindowname"],
+                              capture_output=True, timeout=2.0, check=False)
+        return proc.stdout.decode("utf-8", errors="replace").strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+# --------------------------------------------------------------------------
+# Device discovery
+# --------------------------------------------------------------------------
+
+def read_text(path):
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def find_hidraw_nodes():
+    """{'input2': '/dev/hidraw0', 'input3': '/dev/hidraw1'} for the Dongle."""
+    found = {}
+    base = "/sys/class/hidraw"
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return found
+    for name in names:
+        uevent = read_text(os.path.join(base, name, "device", "uevent"))
+        hid_id = phys = ""
+        for line in uevent.splitlines():
+            if line.startswith("HID_ID="):
+                hid_id = line[7:]
+            elif line.startswith("HID_PHYS="):
+                phys = line[9:]
+        parts = hid_id.split(":")
+        if len(parts) != 3:
+            continue
+        try:
+            vendor, product = int(parts[1], 16), int(parts[2], 16)
+        except ValueError:
+            continue
+        if vendor != VENDOR_ID or product != PRODUCT_ID:
+            continue
+        iface = phys.rsplit("/", 1)[-1] if "/" in phys else phys
+        found[iface] = "/dev/" + name
+    return found
+
+
+def find_event_nodes():
+    """[(path, name)] evdev nodes belonging to the Dongle."""
+    nodes = []
+    base = "/sys/class/input"
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return nodes
+    for name in names:
+        if not name.startswith("event"):
+            continue
+        dev = os.path.join(base, name, "device")
+        if read_text(os.path.join(dev, "id", "vendor")).lower() != "%04x" % VENDOR_ID:
+            continue
+        if read_text(os.path.join(dev, "id", "product")).lower() != "%04x" % PRODUCT_ID:
+            continue
+        nodes.append(("/dev/input/" + name, read_text(os.path.join(dev, "name"))))
+    return nodes
+
+
+# --------------------------------------------------------------------------
+# The device
+# --------------------------------------------------------------------------
+
+class Vibekey:
+    def __init__(self):
+        self.hid_fd = None      # interface 2: standard HID reports
+        self.vendor_fd = None   # interface 3: TEA channel
+        self.event_fds = []     # grabbed evdev nodes
+        self.mouse_fd = None    # the node carrying the knob's wheel reports
+        self.grabbed = False
+        self.mouse_passthrough = False
+        self.names = []
+        self.keys_down = {}     # usage -> modifier names at press time
+        self.mods_down = ""     # modifier-only chord currently held
+        self.mods_fired = False
+        self.consumer_down = None
+        self.mouse_buttons = 0
+
+    @property
+    def connected(self):
+        return self.hid_fd is not None
+
+    def open(self, grab):
+        """Returns 'ok', 'absent' or 'denied'."""
+        hidraw = find_hidraw_nodes()
+        if "input2" not in hidraw:
+            return "absent"
+        try:
+            self.hid_fd = os.open(hidraw["input2"], os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+        except PermissionError:
+            return "denied"
+        except OSError as error:
+            # ENOENT/ENODEV: the Dongle is mid-reboot; the next scan catches it.
+            if error.errno not in (errno.ENOENT, errno.ENODEV, errno.ENXIO):
+                log("open", hidraw["input2"], error)
+            return "absent"
+        if "input3" in hidraw:
+            try:
+                self.vendor_fd = os.open(hidraw["input3"], os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+            except OSError as error:
+                log("vendor channel unavailable:", error)
+                self.vendor_fd = None
+        self.names = []
+        for path, name in find_event_nodes():
+            self.names.append(name)
+            try:
+                fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+            except OSError as error:
+                log("open", path, error)
+                continue
+            self.event_fds.append(fd)
+            if "mouse" in name.lower():
+                self.mouse_fd = fd
+        self.set_grab(grab)
+        return "ok"
+
+    def set_grab(self, grab, mouse_passthrough=False):
+        ok = True
+        for fd in self.event_fds:
+            want = grab and not (mouse_passthrough and fd == self.mouse_fd)
+            try:
+                fcntl.ioctl(fd, EVIOCGRAB, 1 if want else 0)
+            except OSError as error:
+                if want and error.errno not in (errno.EINVAL, errno.EBUSY):
+                    ok = False
+                    log("grab failed:", error)
+        self.grabbed = bool(grab and ok and self.event_fds)
+        self.mouse_passthrough = bool(grab and mouse_passthrough and self.mouse_fd is not None)
+
+    def close(self):
+        for fd in [self.hid_fd, self.vendor_fd] + self.event_fds:
+            if fd is None:
+                continue
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        self.hid_fd = self.vendor_fd = None
+        self.event_fds = []
+        self.mouse_fd = None
+        self.grabbed = False
+        self.mouse_passthrough = False
+        self.keys_down = {}
+        self.mods_down = ""
+        self.mods_fired = False
+        self.consumer_down = None
+        self.mouse_buttons = 0
+
+    def fds(self):
+        out = []
+        if self.hid_fd is not None:
+            out.append(self.hid_fd)
+        if self.vendor_fd is not None:
+            out.append(self.vendor_fd)
+        out.extend(self.event_fds)
+        return out
+
+    # ---- vendor channel -------------------------------------------------
+
+    def request_battery(self):
+        if self.vendor_fd is None:
+            return False
+        try:
+            os.write(self.vendor_fd, vendor_frame(BATTERY_REQUEST))
+            return True
+        except OSError as error:
+            log("battery request failed:", error)
+            return False
+
+    def write_vendor(self, frame):
+        """One lighting frame: exactly 64 bytes, report ID 0x55 included (spec §5.5)."""
+        if self.vendor_fd is None:
+            return False
+        try:
+            os.write(self.vendor_fd, frame)
+            return True
+        except OSError as error:
+            log("vendor write failed:", error)
+            return False
+
+    def read_vendor(self):
+        """Yields decoded (plaintext) frames waiting on the vendor channel."""
+        while True:
+            try:
+                report = os.read(self.vendor_fd, 128)
+            except BlockingIOError:
+                return
+            if not report:
+                return
+            plain = vendor_decode(report)
+            if plain:
+                yield plain
+
+    # ---- standard HID reports --------------------------------------------
+
+    def read_reports(self):
+        """Yields (raw_id, label, phase) for the controls in waiting reports."""
+        while True:
+            try:
+                report = os.read(self.hid_fd, 64)
+            except BlockingIOError:
+                return
+            if not report:
+                return
+            yield from self.decode(report)
+
+    def decode(self, report):
+        rid = report[0]
+        if rid == 0x03 and len(report) >= 4:
+            yield from self.decode_keyboard(report)
+        elif rid == 0x01 and len(report) >= 3:
+            yield from self.decode_consumer(report)
+        elif rid == 0x02 and len(report) >= 5:
+            yield from self.decode_mouse(report)
+
+    def decode_keyboard(self, report):
+        mod_byte = report[1]
+        mods = "+".join(sorted({name for bit, name in MODIFIER_BITS if mod_byte & bit}))
+        keys = [k for k in report[3:9] if k]
+        for usage in keys:
+            if usage not in self.keys_down:
+                self.keys_down[usage] = mods
+                self.mods_fired = True
+                yield self.keyboard_id(usage, mods), self.keyboard_label(usage, mods), "press"
+        for usage in list(self.keys_down):
+            if usage not in keys:
+                held = self.keys_down.pop(usage)
+                yield self.keyboard_id(usage, held), self.keyboard_label(usage, held), "release"
+        # A chord of modifiers alone (e.g. a key remapped to plain Ctrl).
+        if mods and not keys and not self.mods_down:
+            self.mods_down = mods
+            self.mods_fired = False
+        elif not mods and self.mods_down:
+            held, self.mods_down = self.mods_down, ""
+            if not self.mods_fired:
+                yield "kbd:" + held, "Keys " + self.pretty_mods(held), "press"
+                yield "kbd:" + held, "Keys " + self.pretty_mods(held), "release"
+
+    @staticmethod
+    def pretty_mods(mods):
+        return "+".join(m.capitalize() for m in mods.split("+") if m)
+
+    def keyboard_id(self, usage, mods):
+        return "kbd:" + (mods + "+" if mods else "") + "0x%02x" % usage
+
+    def keyboard_label(self, usage, mods):
+        name = KEYBOARD_USAGES.get(usage, "0x%02X" % usage)
+        return "Key " + (self.pretty_mods(mods) + "+" if mods else "") + name
+
+    def decode_consumer(self, report):
+        usage = report[1] | (report[2] << 8)
+        if usage and usage != self.consumer_down:
+            if self.consumer_down:
+                yield self.consumer_event(self.consumer_down, "release")
+            self.consumer_down = usage
+            yield self.consumer_event(usage, "press")
+        elif not usage and self.consumer_down:
+            usage, self.consumer_down = self.consumer_down, None
+            yield self.consumer_event(usage, "release")
+
+    @staticmethod
+    def consumer_event(usage, phase):
+        return "con:0x%04x" % usage, "Media " + CONSUMER_USAGES.get(usage, "0x%04X" % usage), phase
+
+    def decode_mouse(self, report):
+        buttons = report[1]
+        for bit in range(5):
+            mask = 1 << bit
+            if buttons & mask and not self.mouse_buttons & mask:
+                yield "mouse:%d" % (bit + 1), "Mouse button %d" % (bit + 1), "press"
+            elif not buttons & mask and self.mouse_buttons & mask:
+                yield "mouse:%d" % (bit + 1), "Mouse button %d" % (bit + 1), "release"
+        self.mouse_buttons = buttons
+        wheel = struct.unpack("b", report[4:5])[0] if len(report) > 4 else 0
+        for _ in range(abs(wheel)):
+            raw_id, label = ("wheel:cw", "Wheel up") if wheel > 0 else ("wheel:ccw", "Wheel down")
+            yield raw_id, label, "press"
+            yield raw_id, label, "release"
+        pan = struct.unpack("b", report[5:6])[0] if len(report) > 5 else 0
+        for _ in range(abs(pan)):
+            raw_id, label = ("pan:right", "Pan right") if pan > 0 else ("pan:left", "Pan left")
+            yield raw_id, label, "press"
+            yield raw_id, label, "release"
+
+    def drain_events(self):
+        for fd in self.event_fds:
+            try:
+                while os.read(fd, INPUT_EVENT_SIZE * 64):
+                    pass
+            except BlockingIOError:
+                pass
+            except OSError as error:
+                if error.errno in (errno.ENODEV, errno.EIO):
+                    raise
+
+
+# --------------------------------------------------------------------------
+# Lighting: the single-writer module (spec §5.5)
+#
+# Vendor frames (plaintext, before TEA): group 0x0B opcode 0x88.
+#   GET all:  01 0b 88 01 00 ...        reply: 81 0b 88 11 ?? ?? mode bright [4 x 5B records]
+#   SET:      01 0b 88 04 mask idx mode bright [4 x 5B records] ...   ack: access 0x14
+# Masks: 0x01 mode (offset 6), 0x02 global bright (7, never written here),
+# 0x04 record type, 0x08 work time, 0x10 breathe level, 0x20 breathe bright,
+# 0x40 always-on bright; record i lives at 8 + 5i .. 12 + 5i.
+# --------------------------------------------------------------------------
+
+LIGHTING_GET = bytes([0x01, 0x0B, 0x88, 0x01, 0x00])
+MASK_MODE, MASK_TYPE, MASK_BREATHE, MASK_ALWAYSON = 0x01, 0x04, 0x20, 0x40
+MODE_WORK = 2
+ACK_DEADLINE = 1.3
+BLINK_LEVEL = 16                     # failure blinks fire at 16 (ticket 11)
+BLINK_PAIR_MS = 120                  # fast on/off pair
+RING_INDEX = 3
+
+
+class Lighting:
+    """Owns every 0x88 write: one outstanding SET, a queue, blink runner,
+    Knob-mode ring patterns, failure blinks, battery policy, and the Device
+    lighting mode policy (guest with one consented Manage lights)."""
+
+    def __init__(self, daemon, enabled=True):
+        self.daemon = daemon
+        self.enabled = enabled
+        self.device_mode = "unknown"        # 0 | 1 | 2 | "unknown" | "disabled"
+        self.records = [[0, 0x0A, 0x02, 0x02, 0x02] for _ in range(4)]  # [type,workTime,level,breatheB,alwaysOnB]
+        self.mode_bright = 0
+        self.queue = []                     # [(plain_frame, kind, meta)]
+        self.outstanding = None             # (frame, kind, meta, deadline)
+        self.mode_notified = False          # once per Daemon start
+        self.low_battery_latched = False
+        self.get_pending = False
+
+    # ---- connection lifecycle -------------------------------------------------
+
+    def on_connected(self, config):
+        self.enabled = any(config.lighting[k] for k in ("mode_ring", "fail_blink", "low_battery"))
+        self.queue = []
+        self.outstanding = None
+        self.get_pending = False
+        if not self.enabled:
+            self.device_mode = "disabled"
+        else:
+            if self.device_mode == "disabled":
+                self.device_mode = "unknown"   # was silenced; re-learn
+            self.request_get()
+        self.daemon.state.set_lighting(device_mode=self.device_mode, last_error="")
+
+    def on_config(self, config):
+        was_enabled = self.enabled
+        self.enabled = any(config.lighting[k] for k in ("mode_ring", "fail_blink", "low_battery"))
+        if not self.enabled:
+            # all switches off: total silence on the 0x88 family (spec §5.5)
+            self.queue = []
+            self.outstanding = None
+            self.device_mode = "disabled"
+            self.daemon.state.set_lighting(device_mode="disabled")
+        elif not was_enabled and self.daemon.device.connected:
+            self.device_mode = "unknown"
+            self.request_get()
+        else:
+            self.apply_ring_pattern()   # patterns/brightness changed (hot-reload)
+
+    # ---- frames ------------------------------------------------------------
+
+    @staticmethod
+    def set_frame(mask, led_index, value, records):
+        """SET frame. Non-mode masks carry their values inside the four records
+        — which always all travel (a zeroed slot would clear that light);
+        mask MODE (0x01) puts its value at frame[6]."""
+        if mask == MASK_MODE:
+            frame = [0x01, 0x0B, 0x88, 0x04, mask, 0x00, value & 0xFF, 0x00]
+        else:
+            frame = [0x01, 0x0B, 0x88, 0x04, mask, led_index, 0x00, 0x00]
+            for rec in records[:4]:
+                frame.extend(int(v) & 0xFF for v in rec)
+        return bytes(frame)
+
+    def _set_record(self, index, mask, rec_type=None, breathe=None, alwayson=None):
+        """Read-modify-write one channel: all four 5-byte records always go
+        along (a zeroed slot would clear another light — spec §5.5)."""
+        rec = list(self.records[index])
+        if rec_type is not None:
+            rec[0] = rec_type
+        if breathe is not None:
+            rec[3] = breathe
+        if alwayson is not None:
+            rec[4] = alwayson
+        self.records[index] = rec
+        self._enqueue(self.set_frame(mask, index, 0, self.records), "set", (index, mask))
+
+    def _enqueue(self, frame, kind, meta):
+        if self.device_mode == "disabled":
+            return
+        if self.device_mode in (0, 1) and kind != "mode":
+            return          # policies idle while the Device lighting mode is not Working
+        self.queue.append((vendor_frame(frame), kind, meta))
+
+    def request_get(self):
+        if self.get_pending or self.outstanding:
+            return
+        self.queue.insert(0, (vendor_frame(LIGHTING_GET), "get", None))
+        self.get_pending = True
+
+    def write_mode_working(self, consented=True):
+        """Manage lights (spec §5.5): the ONLY way vibekeyd writes mask 0x01."""
+        if not consented:
+            return False
+        self._enqueue(bytes([0x01, 0x0B, 0x88, 0x04, MASK_MODE, 0x00, MODE_WORK, 0x00]) + bytes(32),
+                      "mode", None)
+        return True
+
+    def apply_ring_pattern(self):
+        if not self.enabled or not self.daemon.config.lighting["mode_ring"]:
+            return
+        label = self.daemon.current_mode_label()
+        pattern = self.daemon.config.lighting["patterns"].get(label, "off")
+        effect, _, level = str(pattern).partition(":")
+        try:
+            level = int(level) if level else 0
+        except ValueError:
+            level, effect = 0, "off"
+        mult = self.daemon.config.lighting["brightness"]
+        level = max(0, min(20, int(round(level * mult))))
+        if effect == "solid" and level > 0:
+            self._set_record(RING_INDEX, MASK_TYPE | MASK_ALWAYSON, rec_type=1, alwayson=level)
+        elif effect == "breathe" and level > 0:
+            self._set_record(RING_INDEX, MASK_TYPE | MASK_BREATHE, rec_type=2, breathe=level)
+        else:
+            self._set_record(RING_INDEX, MASK_TYPE, rec_type=0)
+
+    def blink_failure(self, slot):
+        if not self.enabled or not self.daemon.config.lighting["fail_blink"]:
+            return
+        index = LED_INDEX.get(slot)
+        if index is None:
+            return
+        restore = list(self.records[index])
+        for step in range(3):
+            self._enqueue_blink(index, 1)          # on at BLINK_LEVEL
+            self._enqueue_blink(index, 0)          # off
+        # restore the owner record after the blinks
+        self.records[index] = restore
+        self._enqueue(self.set_frame(MASK_TYPE | MASK_ALWAYSON | MASK_BREATHE, index, 0, self.records),
+                      "set", (index, "restore"))
+
+    def _enqueue_blink(self, index, on):
+        if self.device_mode == "disabled" or self.device_mode in (0, 1):
+            return
+        saved = list(self.records[index])
+        rec = list(saved)
+        rec[0] = 1 if on else 0
+        rec[4] = BLINK_LEVEL if on else 0
+        self.records[index] = rec
+        self._enqueue(self.set_frame(MASK_TYPE | MASK_ALWAYSON, index, 0, self.records), "set", (index, "blink"))
+        self.records[index] = saved
+
+    def low_battery(self, percent, charging):
+        if not self.enabled or not self.daemon.config.lighting["low_battery"]:
+            return
+        if not charging and percent <= 10 and not self.low_battery_latched:
+            self.low_battery_latched = True
+            self._set_record(RING_INDEX, MASK_TYPE | MASK_BREATHE, rec_type=2,
+                             breathe=max(1, int(round(6 * self.daemon.config.lighting["brightness"]))))
+            notify("vibekey", "AU05 battery low (%d%%)" % percent)
+        elif percent > 20 and self.low_battery_latched:
+            self.low_battery_latched = False
+            self.apply_ring_pattern()
+
+    # ---- pump / replies ------------------------------------------------------
+
+    def pump(self, now):
+        if not self.enabled or not self.daemon.device.connected:
+            return
+        if self.outstanding and now > self.outstanding[3]:
+            frame, kind, meta, _ = self.outstanding
+            self.outstanding = None
+            if kind == "get":
+                self.get_pending = False
+                # unanswered GET is normal while the keypad sleeps (spec §5.5 optimistic)
+            elif kind == "mode":
+                self.daemon.state.set_lighting(last_error="No answer from the device — press any key on the AU05, then try again.")
+            log("lighting write timed out:", kind)
+        if self.outstanding or not self.queue:
+            return
+        frame, kind, meta = self.queue.pop(0)
+        if not self.daemon.device.write_vendor(frame):
+            return
+        self.outstanding = (frame, kind, meta, now + ACK_DEADLINE)
+
+    def handle_reply(self, plain):
+        """A decrypted vendor frame: returns True when it was a lighting frame."""
+        if len(plain) < 8 or (plain[0] & 0x1F) != 0x01 or plain[1] != 0x0B or plain[2] != 0x88:
+            return False
+        access = plain[3]
+        if not (access & 0x10):          # 0x11 = GET reply, 0x14 = SET ack
+            return False
+        kind = self.outstanding[1] if self.outstanding else None
+        self.outstanding = None
+        self.get_pending = False
+        if kind == "mode":
+            self.device_mode = MODE_WORK
+            self.daemon.state.set_lighting(device_mode=MODE_WORK, pending_mode=False, last_error="")
+            self.apply_ring_pattern()
+            log("device lighting mode set to Working (Manage lights)")
+            return True
+        if access == 0x11:
+            self.device_mode = plain[6]
+            self.mode_bright = plain[7]
+            for i in range(4):
+                self.records[i] = list(plain[8 + 5 * i:13 + 5 * i])
+            self.daemon.state.set_lighting(device_mode=self.device_mode, last_error="")
+            self.apply_ring_pattern()
+            if self.device_mode in (0, 1) and not self.mode_notified:
+                self.mode_notified = True
+                label = "Always Off" if self.device_mode == 0 else "Always On"
+                notify("vibekey", 'AU05 device lighting is "%s" — knob ring and keycap '
+                                  'blinks are idle. Open the Panel → Lighting to let '
+                                  'vibekeyd manage lights.' % label)
+            return True
+        # SET ack: we trust the ack (ring readback is verifiably stale — spec §5.5)
+        self.daemon.state.set_lighting(last_error="")
+        return True
+
+
+# --------------------------------------------------------------------------
+# Main loop
+# --------------------------------------------------------------------------
+
+class Daemon:
+    def __init__(self, probe=False, grab=True, battery=True, lighting_enabled=True):
+        self.probe = probe
+        self.allow_grab = grab
+        self.allow_battery = battery
+        self.allow_lighting = lighting_enabled
+        self.config = Config(CONFIG_PATH)
+        self.seen = Seen(SEEN_PATH)
+        self.state = State(STATE_PATH)
+        self.device = Vibekey()
+        self.orca = Orca(self.config)
+        self.opencode = OpenCode()
+        self.lighting = Lighting(self, enabled=False)
+        self.next_rescan = 0.0
+        self.next_battery = 0.0
+        self.next_config = 0.0
+        self.running = True
+        self.events = 0
+        self.knob_position = 0
+        # knob runtime state (spec §5.3): resets at boot by design
+        self.knob_mode_index = 0
+        self.knob_press_at = None
+        self.dictation_held = False
+        # Session cycle state (spec §5.3)
+        self.cursor_sid = None
+        # worktree cycle state (spec §5.3)
+        self.cursor_worktree = None
+        self.catalogue_mtime = None
+        self.catalogue = {}
+
+    # ---- catalogue / knob modes ------------------------------------------------
+
+    def load_catalogue(self, force=False):
+        try:
+            mtime = os.stat(ACTIONS_PATH).st_mtime_ns
+        except OSError:
+            mtime = None
+        if force or mtime != self.catalogue_mtime:
+            self.catalogue_mtime = mtime
+            self.catalogue = read_json(ACTIONS_PATH, {})
+        return self.catalogue
+
+    def knob_mode_ids(self):
+        modes = {p.get("id") for p in self.load_catalogue().get("knob_turn") or [] if isinstance(p, dict)}
+        ids = [m for m in self.config.knob_modes if m in modes]
+        return ids or ([m for m in KNOB_MODES_DEFAULT if m in modes] or ["scroll"])
+
+    def current_mode_id(self):
+        ids = self.knob_mode_ids()
+        self.knob_mode_index %= len(ids)
+        return ids[self.knob_mode_index]
+
+    def current_mode_entry(self):
+        wanted = self.current_mode_id()
+        for mode in self.load_catalogue().get("knob_turn") or []:
+            if isinstance(mode, dict) and mode.get("id") == wanted:
+                return mode
+        return {"id": wanted, "label": wanted.capitalize()}
+
+    def current_mode_label(self):
+        return str(self.current_mode_entry().get("label") or self.current_mode_id().capitalize())
+
+    def cycle_knob_mode(self):
+        ids = self.knob_mode_ids()
+        self.knob_mode_index = (self.knob_mode_index + 1) % len(ids)
+        mode_id = ids[self.knob_mode_index]
+        label = self.current_mode_label()
+        self.state.set(knob_mode={"id": mode_id, "label": label})
+        notify("vibekey", "Knob mode: %s" % label)
+        self.lighting.apply_ring_pattern()
+        return mode_id, label
+
+    def knob_scroll_active(self):
+        mode = self.current_mode_entry()
+        return any(isinstance(mode.get(side), dict) and mode[side].get("scroll")
+                   for side in ("right", "left"))
+
+    def turn_entry(self, side):
+        mode = self.current_mode_entry()
+        source = mode.get(side) if isinstance(mode.get(side), dict) else {}
+        entry = preset_entry(mode, "knob:" + str(mode.get("id")), ())
+        for field in ENTRY_FIELDS:
+            if isinstance(source.get(field), str) and source[field]:
+                entry[field] = source[field]
+        return entry
+
+    # ---- preview / device lifecycle ---------------------------------------
+
+    def want_grab(self):
+        return self.allow_grab
+
+    @staticmethod
+    def preview_active():
+        """True while the Panel is open: report Control events, do not run them."""
+        try:
+            info = os.stat(PREVIEW_PATH)
+            if time.time() - info.st_mtime > PREVIEW_MAX_AGE:
+                return False
+            with open(PREVIEW_PATH, "r", encoding="utf-8") as handle:
+                return handle.read(16).strip() == "open"
+        except OSError:
+            return False
+
+    def connect(self):
+        access = self.device.open(self.want_grab())  # sync_grab() refines the mouse node below
+        if access != "ok":
+            self.device.close()
+            hint = ""
+            if access == "denied":
+                hint = ("No permission to read the Dongle — add this user to the "
+                        "vibekey group: gpasswd -a $USER vibekey (then re-login).")
+            self.state.set(connected=False, access=access, grabbed=False, device=None, error=hint)
+            return False
+        log("connected:", ", ".join(self.device.names) or "hidraw only",
+            "(grabbed)" if self.device.grabbed else "(not grabbed)")
+        self.sync_grab()
+        self.state.set(connected=True, access="ok", grabbed=self.device.grabbed, error="",
+                       device={"name": PRODUCT_NAME, "inputs": self.device.names,
+                               "vendor_channel": self.device.vendor_fd is not None})
+        self.next_battery = time.monotonic() + 1.0
+        if self.allow_lighting:
+            self.lighting.on_connected(self.config)
+        return True
+
+    def disconnect(self, reason):
+        if self.device.connected:
+            log("disconnected:", reason)
+        self.device.close()
+        self.state.set(connected=False, grabbed=False, device=None, battery=None)
+        self.next_rescan = time.monotonic() + RESCAN_INTERVAL
+
+    # ---- failure surface (spec §5.3/§5.4) -----------------------------------
+
+    def fail(self, slot, message, blink=True):
+        notify("vibekey", message)
+        self.state.set(last_error=message)
+        if blink and self.allow_lighting:
+            self.lighting.blink_failure(slot)
+
+    # ---- behaviors (spec §5) --------------------------------------------------
+
+    def handy_running(self):
+        try:
+            proc = subprocess.run(["pgrep", "-x", "handy"], capture_output=True, timeout=2.0, check=False)
+            return proc.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+    def dictation_ptt(self, entry, phase):
+        chord = entry.get("keys") or DICTATION_CHORD_DEFAULT
+        if phase == "press":
+            if not self.handy_running():
+                self.fail("key1", "handy is not running", blink=True)
+                return "dictation: handy absent"
+            xdo_hold(chord, True)
+            self.dictation_held = True
+            return "dictation keydown " + chord
+        if self.dictation_held:
+            self.dictation_held = False
+            xdo_hold(chord, False)
+            return "dictation keyup " + chord
+        return None
+
+    def session_rows(self):
+        rows = self.opencode.root_sessions()
+        if rows is None:
+            self.fail(None, "OpenCode service is not running")
+        else:
+            rows = [r for r in rows if isinstance(r, dict) and r.get("id")]
+            if not rows:
+                self.fail(None, "OpenCode has no root Sessions")
+        return rows or []
+
+    def raise_host(self, row):
+        title = str(row.get("title") or "")
+        directory = str((row.get("location") or {}).get("directory") or "")
+        oc_title = "OC | " + title
+        if self.orca.binary and self.orca.running():
+            for term in self.orca.terminals():
+                if not isinstance(term, dict):
+                    continue
+                if term.get("title") == oc_title or (directory and term.get("worktreePath") == directory):
+                    self.orca.switch_terminal(term.get("handle"))
+                    raise_pids(pids_named("orca-ide"))
+                    return "orca"
+        if raise_title(oc_title):
+            return "wmctrl"
+        return None
+
+    def step_sessions(self, direction):
+        rows = self.session_rows()
+        if not rows:
+            return "sessions: none"
+        ids = [r.get("id") for r in rows if isinstance(r, dict) and r.get("id")]
+        if not ids:
+            return "sessions: none"
+        index = ids.index(self.cursor_sid) if self.cursor_sid in ids else None
+        if index is None and self.cursor_sid is not None:
+            self.fail(None, "Session %s is gone — skipping to the next" % self.cursor_sid, blink=False)
+            index = 0
+        if index is None:
+            index = -1 if direction > 0 else 0
+        target = ids[(index + direction) % len(ids)]
+        row = next(r for r in rows if r.get("id") == target)
+        self.cursor_sid = target
+        where = self.raise_host(row)
+        return "session %s (%s)" % (target, where or "host not raised")
+
+    def focus_host(self):
+        rows = self.session_rows()
+        row = next((r for r in rows if isinstance(r, dict) and r.get("id") == self.cursor_sid), None)
+        if row is None and rows:
+            row = rows[0]
+            self.cursor_sid = row.get("id")
+        if row is None:
+            return "sessions: none"
+        where = self.raise_host(row)
+        return "focus %s (%s)" % (row.get("id"), where or "host not raised")
+
+    def interrupt(self, slot):
+        rows = self.session_rows()
+        if not rows:
+            return "interrupt: none"
+        title = focused_window_title()
+        row = None
+        if title:
+            row = next((r for r in rows if isinstance(r, dict)
+                        and ("OC | " + str(r.get("title") or "")) == title), None)
+        if row is None:
+            row = next((r for r in rows if isinstance(r, dict) and r.get("id") == self.cursor_sid), rows[0])
+        sid = row.get("id")
+        if self.opencode.interrupt(sid):
+            return "interrupted %s (API)" % sid
+        directory = str((row.get("location") or {}).get("directory") or "")
+        if self.orca.binary and self.orca.running():
+            for term in self.orca.terminals():
+                if isinstance(term, dict) and (term.get("title") == "OC | " + str(row.get("title") or "")
+                                               or (directory and term.get("worktreePath") == directory)):
+                    if self.orca.send_interrupt(term.get("handle")):
+                        return "interrupted %s (orca)" % sid
+        if raise_title("OC | " + str(row.get("title") or "")):
+            time.sleep(0.15)          # let the raise land before the keystroke
+            xdo_key("Escape")         # Esc only — NEVER Ctrl+C (ticket 6)
+            return "interrupted %s (Esc)" % sid
+        self.fail(slot, "Could not interrupt Session %s" % sid)
+        return "interrupt failed"
+
+    def step_worktrees(self, direction):
+        if not (self.orca.binary and self.orca.running()):
+            self.fail(None, "Orca is not running")
+            return "orca: not running"
+        rows = [w for w in self.orca.worktrees() if isinstance(w, dict) and not w.get("isArchived")]
+        if not rows:
+            return "orca: no worktrees"
+        rows.sort(key=lambda w: (w.get("sortOrder") if isinstance(w.get("sortOrder"), int) else 0,
+                                 str(w.get("path") or "")))
+        keys = [str((w.get("identity") or {}).get("key") or "") for w in rows]
+        keys = [k for k in keys if k]
+        if not keys:
+            return "orca: no identities"
+        index = keys.index(self.cursor_worktree) if self.cursor_worktree in keys else -1 if direction > 0 else 0
+        target = keys[(index + direction) % len(keys)]
+        if self.orca.activate_worktree(target):
+            raise_pids(pids_named("orca-ide"))
+            self.cursor_worktree = target
+            return "worktree %s" % target
+        self.fail(None, "Orca refused to activate a worktree")
+        return "orca: activate failed"
+
+    def run_behavior(self, behavior, entry, phase, slot):
+        if behavior == "dictation.ptt":
+            return self.dictation_ptt(entry, phase)
+        if phase != "press":
+            return None
+        direction = -1 if str(entry.get("dir") or "+1").strip() in ("-1", "-") else 1
+        if behavior == "session.next":
+            return self.step_sessions(1)
+        if behavior == "session.prev":
+            return self.step_sessions(-1)
+        if behavior == "session.focus":
+            return self.focus_host()
+        if behavior == "session.interrupt":
+            return self.interrupt(slot)
+        if behavior == "sessions.turn":
+            return self.step_sessions(direction)
+        if behavior == "orca.worktree.next":
+            return self.step_worktrees(1)
+        if behavior == "orca.worktree.prev":
+            return self.step_worktrees(-1)
+        log("unknown behavior:", behavior)
+        self.state.set(error="Unknown behavior in config: %s" % behavior)
+        return None
+
+    # ---- plain (non-behavior) actions ----------------------------------------
+
+    def run_action(self, entry, phase, slot=None):
+        """phase is 'press' or 'release'. Returns a short description or None."""
+        if not isinstance(entry, dict):
+            return None
+        behavior = entry.get("behavior")
+        if isinstance(behavior, str) and behavior:
+            return self.run_behavior(behavior, entry, phase, slot)
+        if phase == "press":
+            command, keys = entry.get("command"), entry.get("keys")
+            if entry.get("scroll"):
+                # Native: the knob's own wheel reports reach libinput because
+                # the daemon leaves the mouse node ungrabbed while `scroll` runs.
+                return "scroll"
+        else:
+            command, keys = entry.get("release_command"), entry.get("release_keys")
+        if isinstance(command, str) and command.strip():
+            spawn(command, shell=True)
+            return command.strip()
+        if isinstance(keys, str) and keys.strip():
+            if xdo_key(keys):
+                return "keys " + keys.strip()
+        return None
+
+    @staticmethod
+    def describe_action(entry, phase):
+        """What run_action WOULD run (Preview narration, spec §3) — no side effects."""
+        if not isinstance(entry, dict):
+            return None
+        behavior = entry.get("behavior")
+        if isinstance(behavior, str) and behavior:
+            return "behavior " + behavior
+        if phase == "press" and entry.get("scroll"):
+            return "scroll"
+        command = entry.get("command") if phase == "press" else entry.get("release_command")
+        if isinstance(command, str) and command.strip():
+            return command.strip()
+        keys = entry.get("keys") if phase == "press" else entry.get("release_keys")
+        if isinstance(keys, str) and keys.strip():
+            return "keys " + keys.strip()
+        return None
+
+    # ---- Control handling ------------------------------------------------------
+
+    def slot_for(self, raw_id):
+        slot = self.config.slot_for(raw_id)
+        # Backspace is the knob turning left on firmware that reports turns as
+        # Right/Backspace, but the knob press on firmware that reports turns
+        # as wheel ticks. Once wheel ticks have been seen and Right never has,
+        # it is the press. A learned alias always wins.
+        if raw_id == "kbd:0x2a" and slot == "knob_left" and not self.config.aliased(raw_id) \
+                and self.seen.has("wheel:cw", "wheel:ccw") and not self.seen.has("kbd:0x4f"):
+            slot = "knob"
+        return slot
+
+    def handle_control(self, raw_id, label, phase):
+        slot = self.slot_for(raw_id)
+        preview = self.preview_active()
+        entry = None
+        action = None
+        if slot == "knob":
+            # press = Knob-mode cycle, long-press = Enter — decided on the
+            # release edge (spec §5.3)
+            if preview:
+                action = "knob mode cycle" if phase == "press" else "long-press → Enter"
+            elif phase == "press":
+                self.knob_press_at = time.monotonic()
+            elif self.knob_press_at is not None:
+                held = time.monotonic() - self.knob_press_at
+                self.knob_press_at = None
+                if held >= LONG_PRESS_SECONDS:
+                    xdo_key("Return")
+                    action = "keys Return (long-press)"
+                else:
+                    _mode_id, mode_label = self.cycle_knob_mode()
+                    action = "knob mode: %s" % mode_label
+        elif slot in ("knob_right", "knob_left"):
+            if phase == "press":
+                entry = self.turn_entry("right" if slot == "knob_right" else "left")
+                action = self.describe_action(entry, phase) if preview else self.run_action(entry, phase, slot)
+        elif slot in SLOT_LABELS:
+            entry = self.config.button(raw_id, slot)
+            action = self.describe_action(entry, phase) if preview else self.run_action(entry, phase, slot)
+        if self.probe:
+            print("%s %-14s %-24s slot=%-10s action=%s" % (time.strftime("%H:%M:%S"), raw_id, label, slot or "-", action or "-"), flush=True)
+        if phase != "press":
+            # the knob's decision (mode cycle vs Enter) lands on the release
+            # edge — narrate it onto the existing press-time last event
+            if slot == "knob" and action:
+                last = dict(self.state.data.get("last") or {})
+                last.update(action=action, at=time.time())
+                self.state.set(last=last)
+            return
+        self.events += 1
+        if slot == "knob_right":
+            self.knob_position += 1
+        elif slot == "knob_left":
+            self.knob_position -= 1
+        # lazy re-GET when the Device lighting mode is unknown and the user
+        # just proved the keypad is awake (spec §5.5 optimistic rule)
+        if self.allow_lighting and self.lighting.device_mode == "unknown":
+            self.lighting.request_get()
+        self.seen.note(raw_id, slot, label)
+        self.state.set(events=self.events, preview=preview, knob_position=self.knob_position, last={
+            "id": raw_id, "slot": slot, "label": SLOT_LABELS.get(slot, label),
+            "at": time.time(), "action": action or "", "preview": preview,
+        })
+
+    def handle_vendor(self, plain):
+        if len(plain) >= 3 and (plain[0] & 0x80):
+            if self.allow_lighting and self.lighting.handle_reply(plain):
+                return
+            if plain[1] == 0x01 and plain[2] == 0x02 and len(plain) >= 11:
+                voltage = plain[4] | (plain[5] << 8)
+                percent = plain[6] | (plain[7] << 8)
+                charging = plain[10] == 1
+                if 0 <= percent <= 100:
+                    self.state.set(battery={"percent": percent, "charging": charging,
+                                            "voltage_mv": voltage, "at": time.time()})
+                    if self.allow_lighting:
+                        self.lighting.low_battery(percent, charging)
+                return
+        if self.probe and (plain[0] & 0x1F) not in (0x06,):  # 0x06 = device heartbeats
+            print("vendor frame:", plain[:16].hex(" "), flush=True)
+
+    def poll_battery(self, now):
+        if not (self.allow_battery and self.config.battery):
+            return
+        if now < self.next_battery:
+            return
+        self.next_battery = now + BATTERY_INTERVAL
+        self.device.request_battery()
+
+    def want_mouse_passthrough(self):
+        return self.knob_scroll_active() and not self.preview_active()
+
+    def sync_grab(self):
+        """Grab state follows the config and the Panel: with the knob on scroll
+        its wheel reports pass through, except while the Panel previews."""
+        grab = self.want_grab()
+        passthrough = grab and self.want_mouse_passthrough()
+        if self.device.grabbed == grab and self.device.mouse_passthrough == passthrough:
+            return
+        self.device.set_grab(grab, passthrough)
+        self.state.set(grabbed=self.device.grabbed, mouse_passthrough=self.device.mouse_passthrough)
+
+    def apply_config_change(self):
+        if self.device.connected:
+            self.sync_grab()
+        if self.allow_lighting:
+            self.lighting.on_config(self.config)
+
+    def check_manage_request(self):
+        """The Panel's consented Manage lights click (spec §5.5): a one-shot
+        file the Daemon consumes; it is the only path that writes mask 0x01."""
+        if not self.allow_lighting or not self.device.connected:
+            return
+        try:
+            if os.path.exists(MANAGE_LIGHTS_PATH):
+                os.unlink(MANAGE_LIGHTS_PATH)
+                self.state.set_lighting(pending_mode=True)
+                self.lighting.write_mode_working(consented=True)
+        except OSError as error:
+            log("manage_lights request failed:", error)
+
+    def run(self):
+        log("config:", CONFIG_PATH)
+        log("state:", STATE_PATH)
+        self.state.set(knob_mode={"id": self.current_mode_id(), "label": self.current_mode_label()})
+        while self.running:
+            now = time.monotonic()
+            reap_children()
+            if now >= self.next_config:
+                self.next_config = now + CONFIG_POLL
+                if self.config.reload():
+                    self.apply_config_change()
+                self.check_manage_request()
+            if self.device.connected:
+                self.sync_grab()
+                if self.allow_lighting:
+                    self.lighting.pump(now)
+            if not self.device.connected:
+                if now >= self.next_rescan:
+                    self.next_rescan = now + RESCAN_INTERVAL
+                    self.connect()
+                time.sleep(min(CONFIG_POLL, max(0.05, self.next_rescan - time.monotonic())))
+                continue
+            self.poll_battery(now)
+            try:
+                ready, _, _ = select.select(self.device.fds(), [], [], CONFIG_POLL)
+            except (OSError, ValueError) as error:
+                self.disconnect("select: %s" % error)
+                continue
+            try:
+                for fd in ready:
+                    if fd == self.device.hid_fd:
+                        for raw_id, label, phase in self.device.read_reports():
+                            self.handle_control(raw_id, label, phase)
+                    elif fd == self.device.vendor_fd:
+                        for plain in self.device.read_vendor():
+                            self.handle_vendor(plain)
+                    else:
+                        self.device.drain_events()
+            except OSError as error:
+                self.disconnect(str(error))
+
+    def stop(self, *_):
+        self.running = False
+
+
+def die_with_parent():
+    """Ask the kernel for SIGTERM when the parent goes away. Under systemd the
+    parent is `systemd --user`, so this fires only at logout (spec §2)."""
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.prctl(1, signal.SIGTERM, 0, 0, 0)  # PR_SET_PDEATHSIG
+    except (OSError, AttributeError):
+        pass
+
+
+def acquire_lock():
+    os.makedirs(RUNTIME_DIR, exist_ok=True)
+    fd = os.open(LOCK_PATH, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+    deadline = time.monotonic() + 5.0
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                log("another vibekeyd holds the device; exiting")
+                sys.exit(0)
+            time.sleep(0.2)
+
+
+def main(argv):
+    probe = "--probe" in argv
+    grab = "--no-grab" not in argv
+    battery = "--no-battery" not in argv
+    lighting = "--no-lighting" not in argv
+    if "-h" in argv or "--help" in argv:
+        print(__doc__.strip())
+        return 0
+    if "--no-pdeathsig" not in argv:
+        die_with_parent()
+    lock_fd = acquire_lock()
+    daemon = Daemon(probe=probe, grab=grab, battery=battery, lighting_enabled=lighting)
+    signal.signal(signal.SIGTERM, daemon.stop)
+    signal.signal(signal.SIGINT, daemon.stop)
+    signal.signal(signal.SIGHUP, lambda *_: daemon.config.reload(force=True) or daemon.apply_config_change())
+    try:
+        daemon.run()
+    finally:
+        daemon.device.close()
+        daemon.state.set(connected=False, grabbed=False, access="stopped", pid=0)
+        os.close(lock_fd)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

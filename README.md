@@ -5,15 +5,18 @@ USB keypad into a programmable control surface on a Manjaro Linux / KDE Plasma /
 X11 desktop, porting the excellent
 [jimmibram/vibekey-driver](https://github.com/jimmibram/vibekey-driver) (Omarchy).
 
-**Status: planning complete — [spec.md](spec.md) is the buildable spec**
-(wayfinder ticket 9, the map's destination; ticket 12 closed the last open
-decision — zero decisions remain open). The map and its decision tickets stay
-as the provenance record. No implementation code yet — implementation sessions
-work from `spec.md`.
+**Status: implementation in progress** on the `impl/port` branch, built from
+[spec.md](spec.md) (the wayfinder map's destination — all 12 tickets closed).
+The map and its decision tickets stay as the provenance record.
 
 ## Layout
 
 - `spec.md` — **the buildable spec** (architecture, config/preset schema, packaging, verification checklist)
+- `bin/vibekeyd`, `bin/vibekey-config` — the daemon (ported device core + behaviors + lighting) and config CLI
+- `actions.json` — the KDE/handy/OpenCode/Orca preset catalogue
+- `panel/` — the PySide6 Panel (Variant A drawn device) + icons + `.desktop`
+- `PKGBUILD`, `systemd/`, `udev/`, `sysusers/` — packaging per spec §9
+- `UPSTREAM` — the pinned audited upstream commit
 - `.wayfinder/map.md` — the map: destination, decisions so far, fog, out of scope
 - `.wayfinder/tickets/` — decision tickets (research / prototype / grilling / task)
 - `GLOSSARY.md` — binding vocabulary for all prose and naming
