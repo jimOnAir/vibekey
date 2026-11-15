@@ -139,7 +139,7 @@ vs *RAN (sim)* for its own simulated clicks (§8).
   "lighting": {
     "mode_ring": true, "fail_blink": true, "low_battery": true,
     "brightness": 1.0,
-    "patterns": { "Scroll": "off", "Sessions": "solid:8", "Volume": "breathe:8" }
+    "patterns": { "Scroll": "off", "Sessions": "heartbeat:8", "Volume": "breathe:8" }
   }
 }
 ```
@@ -167,11 +167,15 @@ vs *RAN (sim)* for its own simulated clicks (§8).
   **replaces upstream's per-config `knob_right`/`knob_left` entries**: turn events
   resolve against the catalogue entry of the *current* mode (which therefore
   stays available; the copied-fields trick no longer applies to knob turn).
-- **`lighting`** — exactly the block accepted in ticket 11 (repeated above).
-  `patterns` values are `effect[:brightness]` strings (`off` | `solid:<0-20>` |
-  `breathe:<0-20>`) addressed by Knob-mode **label**; a mode with no entry →
-  `off`. `brightness` is a multiplier (0.0–1.0) applied to every level the
-  lighting module writes (effective level = level × brightness).
+- **`lighting`** — exactly the block accepted in ticket 11, with the rhythm
+  extension (owner request, 2026-11-15). `patterns` values are strings
+  addressed by Knob-mode **label**; a mode with no entry → `off`. Grammar:
+  `off` | `solid:<0-20>` | `breathe:<0-20>` | `<rhythm>[:<level>[:<period_ms>]]`
+  where `<rhythm>` ∈ `pulse` · `heartbeat` · `tick` · `wave` · `gallop`
+  (host-driven sequences, §5.5; level default 8). Code defaults:
+  `Scroll:off`, `Sessions:heartbeat:8`, `Volume:breathe:8`.
+  `brightness` is a multiplier (0.0–1.0) applied to every level the lighting
+  module writes (effective level = level × brightness).
   Hot-reloaded by the existing 0.5 s config poll. The switches are feature
   toggles: `mode_ring` §5.3, `fail_blink` §5.4, `low_battery` §5.4.
 - **`grab`** / **`battery`** / **`aliases`**: upstream semantics, unchanged.
@@ -387,6 +391,14 @@ The Daemon is a **guest with one consented Manage lights**:
   The Panel brightness slider changes only the config `lighting.brightness`
   multiplier (§4) — it never touches the device's global brightness, so
   vibekeyd cannot dim a device the user set to Always On.
+- **Rhythm engine** (owner extension, 2026-11-15): patterns naming a built-in
+  rhythm (`pulse` · `heartbeat` · `tick` · `wave` · `gallop`; table
+  `RHYTHMS` in `vibekeyd`) run as queued cycles on the single writer — one SET
+  per step with `not_before` pacing; `pump()` re-queues the next cycle when
+  idle past `rhythm_tail`. Rhythm steps never dirty the owner records; a mode
+  switch, the `mode_ring` switch, or the low-battery latch purges queued
+  `rhythm` frames so cycles never interleave. Device-native `breathe` remains
+  available and is still the Volume default (zero host traffic for it).
 - **All three switches off → total silence**: no lighting GET, no `0x88`
   traffic from vibekeyd at all (the battery opcode on the same fd is
   unaffected), `device_mode: "disabled"`, no notify — cleanest form of "be

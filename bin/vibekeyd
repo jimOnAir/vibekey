@@ -336,7 +336,7 @@ class Config:
         block = self.data.get("lighting")
         merged = {"mode_ring": True, "fail_blink": True, "low_battery": True,
                   "brightness": 1.0,
-                  "patterns": {"Scroll": "off", "Sessions": "solid:8", "Volume": "breathe:8"}}
+                  "patterns": {"Scroll": "off", "Sessions": "heartbeat:8", "Volume": "breathe:8"}}
         if isinstance(block, dict):
             for key in ("mode_ring", "fail_blink", "low_battery"):
                 merged[key] = block.get(key) is not False
@@ -1056,6 +1056,18 @@ BLINK_LEVEL = 16                     # failure blinks fire at 16 (ticket 11)
 BLINK_PAIR_MS = 120                  # fast on/off pair
 RING_INDEX = 3
 
+# Host-driven rhythms (the blink runner as a sequencer): name -> (period_ms,
+# [(offset_ms, level_fraction), ...]). A 0.0 entry turns the ring off, so each
+# cycle is self-contained; the next cycle is scheduled when the queue drains.
+# Fractions scale the pattern's level (0–20) and the brightness multiplier.
+RHYTHMS = {
+    "pulse":     (2600, [(0, 0.30), (120, 0.65), (240, 1.00), (400, 0.45), (540, 0.0)]),
+    "heartbeat": (2800, [(0, 0.55), (100, 1.00), (210, 0.20), (330, 0.80), (430, 1.00), (560, 0.0)]),
+    "tick":      (1300, [(0, 0.90), (150, 0.0)]),
+    "wave":      (2400, [(0, 0.20), (320, 0.55), (640, 0.85), (960, 1.00), (1280, 0.70), (1600, 0.40), (1920, 0.15)]),
+    "gallop":    (2200, [(0, 0.6), (110, 1.0), (220, 0.2), (360, 0.8), (470, 1.0), (580, 0.2), (740, 1.0), (860, 0.0)]),
+}
+
 
 class Lighting:
     """Owns every 0x88 write: one outstanding SET, a queue, blink runner,
@@ -1073,6 +1085,8 @@ class Lighting:
         self.mode_notified = False          # once per Daemon start
         self.low_battery_latched = False
         self.get_pending = False
+        self.rhythm = None                  # (name, level, period_ms) while a host rhythm runs
+        self.rhythm_tail = 0.0
 
     # ---- connection lifecycle -------------------------------------------------
 
@@ -1154,16 +1168,35 @@ class Lighting:
 
     def apply_ring_pattern(self):
         if not self.enabled or not self.daemon.config.lighting["mode_ring"]:
+            if self.enabled:
+                self.rhythm = None
+                self.queue = [q for q in self.queue if q[1] != "rhythm"]
+                self._set_record(RING_INDEX, MASK_TYPE, rec_type=0)   # switch off mid-rhythm → dark
             return
         if self.low_battery_latched and self.daemon.config.lighting["low_battery"]:
-            return   # the low-battery breathe owns the ring while it lasts (spec §5.4)
+            self.rhythm = None
+            self.queue = [q for q in self.queue if q[1] != "rhythm"]   # latch owns the ring until reset
+            return
         label = self.daemon.current_mode_label()
-        pattern = self.daemon.config.lighting["patterns"].get(label, "off")
-        effect, _, level = str(pattern).partition(":")
+        parts = str(self.daemon.config.lighting["patterns"].get(label, "off")).split(":")
+        effect = parts[0]
         try:
-            level = int(level) if level else 0
+            level = int(parts[1]) if len(parts) > 1 and parts[1] else 0
         except ValueError:
             level, effect = 0, "off"
+        try:
+            period = int(parts[2]) if len(parts) > 2 and parts[2] else 0
+        except ValueError:
+            period = 0
+        if effect in RHYTHMS:
+            # host-driven rhythm: queue one cycle, pump() schedules the next;
+            # drop any old cycle's steps so mode switches never interleave
+            self.queue = [q for q in self.queue if q[1] != "rhythm"]
+            self.rhythm = (effect, max(1, min(20, level or 8)), max(600, period or RHYTHMS[effect][0]))
+            self.start_rhythm_cycle()
+            return
+        self.rhythm = None
+        self.queue = [q for q in self.queue if q[1] != "rhythm"]
         mult = self.daemon.config.lighting["brightness"]
         level = max(0, min(20, int(round(level * mult))))
         if effect == "solid" and level > 0:
@@ -1172,6 +1205,20 @@ class Lighting:
             self._set_record(RING_INDEX, MASK_TYPE | MASK_BREATHE, rec_type=2, breathe=level)
         else:
             self._set_record(RING_INDEX, MASK_TYPE, rec_type=0)
+
+    def start_rhythm_cycle(self):
+        name, level, period = self.rhythm
+        mult = self.daemon.config.lighting["brightness"]
+        base = time.monotonic()
+        for offset_ms, frac in RHYTHMS[name][1]:
+            lvl = 0 if frac <= 0 else max(1, min(20, int(round(level * frac * mult))))
+            rec = list(self.records[RING_INDEX])
+            rec[0] = 1 if lvl > 0 else 0
+            rec[4] = lvl
+            frame = self.set_frame(MASK_TYPE | MASK_ALWAYSON, RING_INDEX, 0,
+                                   self._with_record(RING_INDEX, rec))
+            self._enqueue(frame, "rhythm", None, base + offset_ms / 1000.0)
+        self.rhythm_tail = base + period / 1000.0
 
     def blink_failure(self, slot):
         if not self.enabled or not self.daemon.config.lighting["fail_blink"]:
@@ -1206,6 +1253,8 @@ class Lighting:
             return
         if not charging and percent <= 10 and not self.low_battery_latched:
             self.low_battery_latched = True
+            self.rhythm = None
+            self.queue = [q for q in self.queue if q[1] != "rhythm"]
             self._set_record(RING_INDEX, MASK_TYPE | MASK_BREATHE, rec_type=2,
                              breathe=max(1, int(round(6 * self.daemon.config.lighting["brightness"]))))
             notify("vibekey", "AU05 battery low (%d%%)" % percent)
@@ -1228,6 +1277,9 @@ class Lighting:
                 self.daemon.state.set_lighting(pending_mode=False,
                                                last_error="No answer from the device — press any key on the AU05, then try again.")
             log("lighting write timed out:", kind)
+        # rhythm: when idle past the cycle end, queue the next one
+        if self.rhythm and not self.outstanding and not self.queue and now >= self.rhythm_tail:
+            self.start_rhythm_cycle()
         if self.outstanding or not self.queue:
             return
         frame, kind, meta, not_before = self.queue[0]
