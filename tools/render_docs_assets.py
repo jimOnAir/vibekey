@@ -82,6 +82,9 @@ def demo_state(tmp):
     os.makedirs(os.path.dirname(vkpanel.HANDY_STORES[0]), exist_ok=True)
     with open(vkpanel.HANDY_STORES[0], "w") as h:
         json.dump(handy, h)
+    # the screenshot shows a healthy box: a real input device present (the
+    # sandbox has no PipeWire socket, so stub the probe deterministically)
+    vkpanel.mic_status = lambda ttl=5.0: ("ok", "alsa_input.usb-AU05_AU05_202606031150-00.analog-stereo")
 
 
 def render_panel(app):
@@ -102,16 +105,17 @@ def render_panel(app):
 
 
 def render_tray_grid(app):
-    labels = ["Scroll", "Sessions", "Volume", "custom mode", "attention"]
+    labels = ["Scroll", "Sessions", "Volume", "custom mode", "attention", "no microphone"]
     modes = [("scroll", "Scroll"), ("sessions", "Sessions"), ("volume", "Volume"),
-             (None, "Монитор"), ("sessions", "Sessions")]
-    warns = [False, False, False, False, True]
+             (None, "Монитор"), ("sessions", "Sessions"), ("sessions", "Sessions")]
+    warns = [False, False, False, False, True, False]
+    mics = [False, False, False, False, False, True]
     cell = 44
     img = QImage(len(labels) * cell, cell + 2, QImage.Format_RGB32)
     img.fill(QColor("#232629"))
     p = QPainter(img)
-    for i, ((mid, mlabel), warn) in enumerate(zip(modes, warns)):
-        pm = vkpanel.app_icon_pixmap(32, warn=warn, mode_id=mid, mode_label=mlabel)
+    for i, ((mid, mlabel), warn, mic) in enumerate(zip(modes, warns, mics)):
+        pm = vkpanel.app_icon_pixmap(32, warn=warn, mode_id=mid, mode_label=mlabel, mic_off=mic)
         p.drawImage(QRectF(i * cell + 6, 4, 32, 32),
                     pm.toImage().scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation))
     p.end()

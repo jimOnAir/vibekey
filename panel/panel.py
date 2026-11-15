@@ -92,6 +92,47 @@ def run_vibekey_config(*args):
 
 
 # ---------------------------------------------------------------------------
+# audio input probe — Panel-side only, the Daemon never touches audio (spec §3)
+# ---------------------------------------------------------------------------
+
+def parse_input_sources(text):
+    """Names of real input sources from `pactl list short sources`: tab-separated
+    index/name/module/format/state; sink monitors (name ends `.monitor`) exist for
+    every output and are not microphones."""
+    names = []
+    for line in text.splitlines():
+        cols = line.split("\t")
+        if len(cols) < 2:
+            continue
+        name = cols[1].strip()
+        if name and not name.endswith(".monitor"):
+            names.append(name)
+    return names
+
+
+_MIC_CACHE = [0.0, "unknown", ""]   # (checked_at, state, detail)
+
+
+def mic_status(ttl=5.0):
+    """('ok'|'missing'|'unknown', detail) — is any microphone connected? Cached so
+    the Panel poll and the tray timer share one pactl call. 'unknown' (no pactl,
+    dead server) never warns — only a real zero of input sources draws the badge."""
+    now = time.monotonic()
+    if now - _MIC_CACHE[0] >= ttl:
+        state, detail = "unknown", ""
+        try:
+            proc = subprocess.run(["pactl", "list", "short", "sources"],
+                                  capture_output=True, text=True, timeout=2.0, check=False)
+            if proc.returncode == 0:
+                names = parse_input_sources(proc.stdout)
+                state, detail = ("ok", names[0]) if names else ("missing", "")
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        _MIC_CACHE[0], _MIC_CACHE[1], _MIC_CACHE[2] = now, state, detail
+    return _MIC_CACHE[1], _MIC_CACHE[2]
+
+
+# ---------------------------------------------------------------------------
 # Prototype art, ported verbatim from prototype_panel_picker.py (ticket 5)
 # ---------------------------------------------------------------------------
 
@@ -271,7 +312,18 @@ def _glyph_letter(letter):
 MODE_GLYPHS = {"scroll": _glyph_scroll, "sessions": _glyph_sessions, "volume": _glyph_volume}
 
 
-def app_icon_pixmap(size=32, warn=False, mode_id=None, mode_label=None):
+def _glyph_mic_off(p, r):
+    """mini mic struck through — microphone not connected (tray warning badge)."""
+    p.save()
+    p.translate(r.topLeft())
+    s = r.width()
+    draw_mic(p, s, "#2c2e33")
+    p.setPen(_pen("#2c2e33", max(1.0, s * 0.09)))
+    p.drawLine(QPointF(s * 0.28, s * 0.74), QPointF(s * 0.74, s * 0.26))
+    p.restore()
+
+
+def app_icon_pixmap(size=32, warn=False, mode_id=None, mode_label=None, mic_off=False):
     pm = QPixmap(size, size)
     pm.fill(Qt.transparent)
     draw_app_icon(pm)
@@ -283,6 +335,15 @@ def app_icon_pixmap(size=32, warn=False, mode_id=None, mode_label=None):
     if glyph is not None:
         _disc_badge(p, size, glyph)
     p.end()
+    if mic_off:  # top-left; the mode disc and the "!" own the bottom corners
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        d = size * 0.42
+        p.setPen(QPen(QColor("#ffffff"), max(1, size // 16)))
+        p.setBrush(QColor("#e8912d"))
+        p.drawEllipse(QRectF(1, 1, d, d))
+        _glyph_mic_off(p, QRectF(1 + d * 0.18, 1 + d * 0.18, d * 0.64, d * 0.64))
+        p.end()
     if warn:  # tray state conveys Daemon failure states (spec §8)
         p = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing)
@@ -692,6 +753,8 @@ class PanelWindow(QMainWindow):
     def build_handy_card(self):
         box = QGroupBox("handy")
         lay = QVBoxLayout(box)
+        self.handy_mic = QLabel()   # audio input line mirrors the tray mic badge
+        lay.addWidget(self.handy_mic)
         self.handy_rows = {}
         for key, text in (("keyboard_implementation", "keyboard_implementation = tauri"),
                           ("shortcut_activation", "shortcut_activation = push_to_talk"),
@@ -739,6 +802,14 @@ class PanelWindow(QMainWindow):
         return {}
 
     def refresh_handy_card(self):
+        mic_state, mic_detail = mic_status()
+        if mic_state == "ok":
+            self.handy_mic.setText("✓ audio input: %s" % mic_detail)
+        elif mic_state == "missing":
+            self.handy_mic.setText("<span style='color:#c0392b'>✗ microphone not connected"
+                                   " — Dictation will not work</span>")
+        else:
+            self.handy_mic.setText("· audio input: unknown (pactl unavailable)")
         store = self.handy_store()
         recommended = {"keyboard_implementation": "tauri", "shortcut_activation": "push_to_talk",
                        "always_on_microphone": True, "overlay_style": None}
@@ -911,6 +982,7 @@ class PanelWindow(QMainWindow):
 class TrayApp:
     def __init__(self, app):
         self.app = app
+        self.mic = "unknown"
         app.setApplicationName("vibekey-panel")
         icon = self.build_icon(False)
         app.setWindowIcon(icon)
@@ -929,11 +1001,26 @@ class TrayApp:
         self.tray = tray
         self.update_icon(self.window.state)   # tray starts already showing the current Knob mode
         tray.show()
+        # audio watcher: the tray is the always-visible surface, so it carries the
+        # "no microphone" warning (owner ask 2026-11-15); pactl answers in ms
+        self.mic_timer = QTimer()
+        self.mic_timer.timeout.connect(self.poll_mic)
+        self.mic_timer.start(5000)
+        self.poll_mic()
 
-    def build_icon(self, problem, mode_id=None, mode_label=None):
+    def poll_mic(self):
+        state, _detail = mic_status()
+        if state != self.mic:
+            self.mic = state
+            self.update_icon(self.window.state)
+        if self.window.isVisible():
+            self.window.refresh_handy_card()   # keep the card's mic line honest
+
+    def build_icon(self, problem, mode_id=None, mode_label=None, mic_off=False):
         icon = QIcon()
         for size in (22, 32):
-            icon.addPixmap(app_icon_pixmap(size, warn=problem, mode_id=mode_id, mode_label=mode_label))
+            icon.addPixmap(app_icon_pixmap(size, warn=problem, mode_id=mode_id,
+                                           mode_label=mode_label, mic_off=mic_off))
         return icon
 
     def update_icon(self, state):
@@ -946,9 +1033,12 @@ class TrayApp:
         tip = "vibekey — AU05 control surface"
         if label:
             tip += " · Knob mode: %s" % label
+        mic_off = self.mic == "missing"
+        if mic_off:
+            tip += " · microphone not connected"
         if problem:
             tip += " · see the Panel (attention badge)"
-        tray.setIcon(self.build_icon(problem, mode.get("id"), label))
+        tray.setIcon(self.build_icon(problem, mode.get("id"), label, mic_off))
         tray.setToolTip(tip)
 
     def toggle_window(self):

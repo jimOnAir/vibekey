@@ -38,7 +38,10 @@ the Daemon brackets your hold with handy's hotkey —
   default); if it drifts from handy's own binding the Panel's handy card warns
   and offers a consented **Fix handy**,
 - expected feel: **~0.5–2 s** from release to text (fast local models;
-  accurate tiers take seconds).
+  accurate tiers take seconds),
+- the Panel's tray badge watches the audio input independently: no microphone
+  connected at all → orange mic-with-slash on the tray (the AU05's own built-in
+  mic counts, so the badge means *nothing to record*, not *your headset only*).
 
 Recommended handy settings, all graded by the handy card: push to talk,
 always-on microphone, overlay off, typing tool `xdotool`, a fast model tier on

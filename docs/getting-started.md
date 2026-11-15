@@ -72,8 +72,9 @@ Open **vibekey Panel** (applications menu, or `vibekey-panel`).
   (if your device mode says so) the consented **Manage lights** action
   ([docs/lighting.md](lighting.md#device-lighting-mode)).
 - The tray icon mirrors the Knob mode with a corner glyph
-  ![tray modes](images/tray-modes.png) and grows an orange **!** when the
-  Daemon needs attention.
+  ![tray modes](images/tray-modes.png), grows an orange **!** when the Daemon
+  needs attention, and shows an orange **mic-with-slash** badge the moment the
+  PC has no audio input — Dictation would silently have nothing to record.
 
 ## 6 · Wire the optional half
 

@@ -43,6 +43,9 @@ session's values (`tr '\0' '\n' < /proc/$(pgrep -u $UID -x plasmashell)/environ 
 
 Work the chain:
 
+0. **Tray mic badge?** An orange mic-with-slash on the tray icon (or the ✗ line
+   atop the Panel's handy card) means the PC has **no audio input at all** —
+   plug a mic in first; everything downstream is moot.
 1. **Is handy running?** vibekey never starts it — `pgrep -x handy`, and check
    the tray (Plasma hides icons by default — the `^` overflow).
 2. **Right backend?** handy must keep `keyboard_implementation = tauri`.
