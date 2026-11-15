@@ -21,8 +21,8 @@
 import json
 import sys
 
-from PySide6.QtCore import Qt, QElapsedTimer
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtCore import Qt, QElapsedTimer, QPointF
+from PySide6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QFrame, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
@@ -607,15 +607,22 @@ class App:
         self.probe.activateWindow()
 
     def make_tray(self):
+        import math
         pm = QPixmap(32, 32)
         pm.fill(Qt.transparent)
         p = QPainter(pm)
-        p.setBrush(QColor("#3d84f6"))
-        p.setPen(Qt.NoPen)
-        p.drawEllipse(3, 3, 26, 26)
-        p.setPen(QColor("white"))
-        p.setFont(QFont("sans", 10, QFont.Bold))
-        p.drawText(pm.rect(), Qt.AlignCenter, "VK")
+        p.setRenderHint(QPainter.Antialiasing)
+        # AU05 knob glyph: graphite dial, pointer notch, grip ticks — not a monogram
+        p.setPen(QPen(QColor("#3a3d42"), 2))
+        p.setBrush(QColor("#e8e9eb"))
+        p.drawEllipse(5, 5, 22, 22)
+        p.setPen(QPen(QColor("#8f9297"), 1.6))
+        for ang in (30, 90, 150, 210, 270, 330):
+            x1, y1 = 16 + 8.4 * math.cos(math.radians(ang)), 16 - 8.4 * math.sin(math.radians(ang))
+            x2, y2 = 16 + 10.2 * math.cos(math.radians(ang)), 16 - 10.2 * math.sin(math.radians(ang))
+            p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+        p.setPen(QPen(QColor("#3d84f6"), 2.4, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(16, 16), QPointF(16 + 6.5 * math.cos(math.radians(60)), 16 - 6.5 * math.sin(math.radians(60))))
         p.end()
         icon = QIcon(pm)
         self.app.setWindowIcon(icon)
