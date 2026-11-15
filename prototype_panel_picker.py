@@ -576,23 +576,25 @@ def _arcs(p, s, color, r=10.4, rot=0.0):
 
 
 def draw_mic(p, s, color):
-    """mic cap: plain mic glyph, no arcs."""
+    """mic cap: plain mic glyph, no arcs — cup hugging the capsule."""
     k = s / 28.0
     p.setPen(_pen(color, 2.2 * k)); p.setBrush(Qt.NoBrush)
-    p.drawRoundedRect(11.2 * k, 4.5 * k, 5.6 * k, 11.5 * k, 2.8 * k, 2.8 * k)
-    path = QPainterPath(); path.moveTo(9 * k, 13 * k)
-    path.cubicTo(9 * k, 20.5 * k, 19 * k, 20.5 * k, 19 * k, 13 * k)
+    p.drawRoundedRect(11.2 * k, 4.5 * k, 5.6 * k, 10.5 * k, 2.8 * k, 2.8 * k)
+    path = QPainterPath(); path.moveTo(8.8 * k, 11.8 * k)
+    path.cubicTo(8.8 * k, 17.5 * k, 19.2 * k, 17.5 * k, 19.2 * k, 11.8 * k)
     p.drawPath(path)
-    p.drawLine(QPointF(14 * k, 19 * k), QPointF(14 * k, 23.5 * k))
-    p.drawLine(QPointF(10.5 * k, 23.5 * k), QPointF(17.5 * k, 23.5 * k))
+    p.drawLine(QPointF(14 * k, 16.2 * k), QPointF(14 * k, 20.5 * k))
+    p.drawLine(QPointF(11.0 * k, 20.5 * k), QPointF(17.0 * k, 20.5 * k))
 
 
 def draw_check(p, s, color):
-    """accept cap: diagonal slash between the two arcs, gap on the diagonal."""
+    """accept cap: V-check between the two arcs, long arm through the gap."""
     k = s / 28.0
     _arcs(p, s, color, rot=-45.0)
-    p.setPen(_pen(color, 2.4 * k)); p.setBrush(Qt.NoBrush)
-    p.drawLine(QPointF(10.8 * k, 17.2 * k), QPointF(17.2 * k, 10.8 * k))
+    p.setPen(_pen(color, 2.6 * k)); p.setBrush(Qt.NoBrush)
+    path = QPainterPath(QPointF(10.6 * k, 14.2 * k))
+    path.lineTo(13.2 * k, 17.0 * k); path.lineTo(17.8 * k, 10.6 * k)
+    p.drawPath(path)
 
 
 def draw_cross(p, s, color):
