@@ -17,9 +17,14 @@ Settle:
   with `makepkg -si`; AUR submission stays out of scope.
 - runtime dependency list from the port audit (python, PySide6, xdotool, handy,
   …).
-- package-owned `/usr/lib/udev/rules.d/…` rule (`fff1:00dd`, uaccess — no
-  sudo-script) and `vibekeyd.service` user unit (`WantedBy=default.target`,
-  `Restart=always`).
+- package-owned `/usr/lib/udev/rules.d/…` rule for `fff1:00dd` — **port audit
+  rejects upstream's `TAG+="uaccess"`** (Dongle re-enumeration race, session
+  dependency): adopt the recommended static `MODE="0660", GROUP="vibekey"` on
+  both `hidraw` and `input` subsystems + `sysusers.d` entry + group membership.
+  Confirm (or amend) this in the package, no sudo-script either way.
+- `vibekeyd.service` user unit (`WantedBy=default.target`, `Restart=always`) —
+  must carry `After=graphical-session.target` for `xdotool`'s
+  `DISPLAY`/`XAUTHORITY`, per port-audit risk R3.
 - config/state paths on this system: `~/.config/vibekey/`,
   `$XDG_RUNTIME_DIR/vibekey/` (upstream's `~/.config/omarchy/vibekey/` moves).
 - versioning scheme against upstream; install/upgrade/remove flows;

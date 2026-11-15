@@ -42,14 +42,17 @@ sessions; nothing on this map builds it.
 
 <!-- one line per closed ticket: name + gist + link -->
 
+- [Upstream port audit: compositor-independence check](tickets/0001-upstream-port-audit.md): daemon core verified compositor-independent on X11 (`EVIOCGRAB` silences libinput; hidraw reads stay complete during Grab) → **keep**; replace wtype→`xdotool`, Quickshell Panel, Omarchy preset catalogue, and the udev rule — uaccess loses the Dongle re-enumeration race → static `MODE="0660", GROUP="vibekey"` rule + `sysusers.d`. Findings on `research/upstream-port-audit`.
 - [Orca CLI surface](tickets/0004-orca-surface.md): *Orca next-worktree* Preset is CLI-clean — `worktree activate` + `terminal switch` cover it, only window-raise falls to X11 (`wmctrl` by `orca-ide` PID); the Daemon must own the cycle cursor (Orca exposes no "which workspace is displayed" query) and re-list terminal handles per fire. Findings on `research/orca-surface`.
 
 ## Not yet specified
 
-- **Firmware-variant confirmation on this actual dongle** — knob-turn/press
-  detection has firmware variants; settling which this unit uses needs
-  `vibekeyd --probe` against a running port with device access. Probably
-  graduates off-map as an implementation-time probe, not a decision here.
+- **Firmware-variant confirmation on this actual Dongle** — the port audit
+  verified this Dongle's node topology (`hidraw12` + vendor channel + 3 event
+  nodes) matches the daemon's assumptions; still open: which knob-turn/press
+  detection variant this firmware uses. Needs `vibekeyd --probe` against the
+  running port with device access — probably graduates off-map as an
+  implementation-time probe, not a decision here.
 - **KDE tray autostart UX for the panel** (the daemon's autostart is settled;
   the panel's is not).
 - **Non-US keyboard layout handling** for key-combo assignments.

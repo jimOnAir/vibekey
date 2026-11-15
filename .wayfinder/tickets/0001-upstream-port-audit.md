@@ -1,7 +1,7 @@
 ---
 title: "Upstream port audit: compositor-independence check"
 type: wayfinder:research
-status: open
+status: closed
 assignee: jimOnAir
 blocked-by: []
 branch: research/upstream-port-audit
@@ -30,3 +30,37 @@ each port assumption against this system (Manjaro, KDE, X11, AU05 on
 **Output**: a port-risk list on `research/upstream-port-audit`, with an explicit
 *keep / replace* decision per component, linked from this ticket. Feeds
 *Packaging & install spec*.
+
+## Answer
+
+**The daemon core is truly compositor-independent — KEEP it; all compositor
+coupling sits in one argv builder, the Quickshell Panel, and the Omarchy preset
+catalogue.** Full evidence: [`research/upstream-port-audit`](https://github.com/jimOnAir/vibekey/blob/research/upstream-port-audit/research/upstream-port-audit.md) (`f6e7473`).
+
+- **Grab/hidraw on X11 — holds.** `EVIOCGRAB` is enforced in the kernel input
+  core, so libinput (X11's path) receives nothing while grabbed; and hidraw
+  copies raw reports *before* the input layer dispatches them — report reading
+  stays complete during the Grab. This Dongle's topology verified against the
+  daemon's assumptions.
+- **Device access — uaccess rejected.** ACLs are UID-based (a user service
+  would be covered), but nothing on this box tags `fff1:00dd`, and the Dongle
+  re-enumerates constantly (journal: 19 reboots in 2.2 min) recreating nodes at
+  root-only defaults. Even upstream's `TAG+="uaccess"` rule has a boot/greeter
+  race bad for a headless service. **Recommendation: static package rule
+  `MODE="0660", GROUP="vibekey"` on both `hidraw` and `input` subsystems, plus
+  `sysusers.d` and group membership** — deterministic at node creation,
+  session-independent.
+- **wtype → xdotool — 1:1.** Upstream's whole injection surface is one-shot
+  combos built at `vibekeyd:425-447`; hold/release Presets (PTT) use
+  `command`/`release_command`, not keys. `xdotool key <combo>` covers it
+  (`logo→super`, `altgr→ISO_Level3_Shift`); the keysym table is kept verbatim.
+- **Keep/replace**: keep the device core, `actions.json` *schema*,
+  config/state file protocol, `vibekey-config`; replace the wtype argv, the
+  `actions.json` *contents* (38 `omarchy-*` presets → KDE/handy/OpenCode), the
+  udev rule, the Quickshell Panel + QML + IPC, `install.sh` (→ PKGBUILD), and
+  `vibekey-herdr-agent`.
+- **Top risks**: 🔴 no device access as currently configured (fixed only by the
+  package rule) · 🔴 shipped defaults *are* Omarchy commands · 🔴 `xdotool`
+  needs `DISPLAY`/`XAUTHORITY` in the user service (present via Plasma's env
+  import, probed) — unit must `After=graphical-session.target`, since `spawn()`
+  swallows failures silently.
