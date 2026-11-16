@@ -13,7 +13,7 @@ never having two hands on the wheel.
 
 | Signal | Where | Meaning |
 |---|---|---|
-| **Ring pattern** | knob ring | your pulse, at a glance, screen-free (default `heartbeat:8`) |
+| **Ring pattern** | knob ring | your pulse, at a glance, screen-free (default `breathe:8` — the firmware's own, zero host traffic) |
 | **Alarm override** | knob ring | fast double-tick while the Cursor Session waits for approval |
 | **Failure blink** | the culprit keycap, 3 fast blinks | *that* press you just made did not work |
 | **Battery breathe** | knob ring, slow | ≤ 10 %, until you charge (one notification per crossing) |
@@ -54,8 +54,12 @@ A pattern string says *what the ring does*:
 | `gallop` | three-beat clip-clop | 2.2 s | `▄█▂▅█▂▇▁ …` |
 | `alarm` | urgent double-tick (reserved: §see below) | 1.4 s | `█▁█▁▄▁ …` |
 
-Default out of the box: **`heartbeat:8`** — one living pulse for the dial
-that points at your Sessions. Set it with the single `lighting.pattern` key
+Default out of the box: **`breathe:8`** — the firmware's own breathing: zero
+host writes, so nothing can stutter (a host-driven rhythm against a keypad
+that misses ACKs strobes and stalls the ring — that blinking was the reason
+native became the default; the breaker also pauses any rhythm after three
+unanswered writes and resumes on wake). Want a host rhythm anyway? Set e.g.
+`"pattern": "heartbeat:8"`, which points at your Sessions. Set it with the single `lighting.pattern` key
 (the old per-mode `patterns` map still loads, `Sessions` entry wins, for
 config compatibility). Unknown rhythm names fall back to `off`, never a
 crash.

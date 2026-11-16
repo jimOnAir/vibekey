@@ -45,9 +45,12 @@ respected (only a *missing* file is seeded).
     "mode_ring": true, "fail_blink": true, "low_battery": true,
     "attention_ring": true,          // §5.7: alarm rhythm on pending approval
     "brightness": 1.0,               // 0.0–1.0 multiplier on all written levels
-    "pattern": "heartbeat:8"         // the one ring pattern (knob modes retired
-                                     // 2026-11-16; a legacy "patterns" map
-                                     // still loads and its "Sessions" wins)
+    "pattern": "breathe:8"           // the one ring pattern; native (`breathe`,
+                                     // `solid`) costs zero host traffic —
+                                     // host rhythms are opt-in
+                                     // (knob modes retired 2026-11-16; a
+                                     // legacy "patterns" map still loads and
+                                     // its "Sessions" wins)
   }
 
   // "orca_cli": "/path/to/orca-ide"  // optional override; otherwise the shim

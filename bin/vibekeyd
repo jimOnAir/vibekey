@@ -363,7 +363,10 @@ class Config:
         merged = {"mode_ring": True, "fail_blink": True, "low_battery": True,
                   "attention_ring": True,
                   "brightness": 1.0,
-                  "patterns": {"Scroll": "off", "Sessions": "heartbeat:8", "Volume": "breathe:8"}}
+                  # native breathe for the Session dial: firmware runs it, zero
+                  # host writes (host-driven rhythms stuttered on a lossy link —
+                  # owner "why keyboard is blinking?" 2026-11-16)
+                  "patterns": {"Scroll": "off", "Sessions": "breathe:8", "Volume": "breathe:8"}}
         if isinstance(block, dict):
             for key in ("mode_ring", "fail_blink", "low_battery", "attention_ring"):
                 merged[key] = block.get(key) is not False
@@ -1299,7 +1302,7 @@ class Lighting:
             parts = ["alarm", "12"]
         else:
             pattern = lighting.get("pattern") or (lighting.get("patterns") or {}).get("Sessions") \
-                or "heartbeat:8"
+                or "breathe:8"
             parts = str(pattern).split(":")
         effect = parts[0]
         try:
@@ -1428,6 +1431,10 @@ class Lighting:
         if not_before > now:
             return                     # blink pacing: the queue waits, never the loop
         self.queue.pop(0)
+        if kind == "rhythm" and now - not_before > 0.5:
+            # a timed-out predecessor delayed us past the beat: skipping the
+            # stale step keeps the rhythm in phase instead of strobing late
+            return
         if not self.daemon.device.write_vendor(frame):
             return
         self.outstanding = (frame, kind, meta, now + ACK_DEADLINE)
