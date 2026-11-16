@@ -731,14 +731,25 @@ class Orca:
         if proc.returncode != 0:
             return None
         try:
-            return json.loads(proc.stdout.decode("utf-8", errors="replace"))
+            reply = json.loads(proc.stdout.decode("utf-8", errors="replace"))
         except ValueError:
             return None
+        # the CLI envelope is {"id", "ok", "result": {...}} (verified against the
+        # shim live 2026-11-16 — before this was unwrapped, terminal/worktree
+        # lists parsed as empty and the Ring never raised Orca tabs)
+        if isinstance(reply, dict) and reply.get("ok") is not False \
+                and isinstance(reply.get("result"), (dict, list)):
+            return reply["result"]
+        return reply
+
+    def _rows(self, reply, key):
+        if isinstance(reply, dict):
+            rows = reply.get(key) or reply.get("data")
+            return rows if isinstance(rows, list) else []
+        return reply if isinstance(reply, list) else []
 
     def terminals(self):
-        reply = self._run(["terminal", "list"])
-        rows = reply.get("data") if isinstance(reply, dict) else None
-        return rows if isinstance(rows, list) else (reply if isinstance(reply, list) else [])
+        return self._rows(self._run(["terminal", "list"]), "terminals")
 
     def switch_terminal(self, handle):
         return self._run(["terminal", "switch", "--terminal", handle]) is not None
@@ -747,9 +758,7 @@ class Orca:
         return self._run(["terminal", "send", "--terminal", handle, "--interrupt"]) is not None
 
     def worktrees(self):
-        reply = self._run(["worktree", "list"])
-        rows = reply.get("data") if isinstance(reply, dict) else None
-        return rows if isinstance(rows, list) else (reply if isinstance(reply, list) else [])
+        return self._rows(self._run(["worktree", "list"]), "worktrees")
 
     def activate_worktree(self, key):
         reply = self._run(["worktree", "activate", "--worktree", "identity:" + key])
@@ -769,9 +778,11 @@ def wmctrl_windows():
     out = []
     for line in proc.stdout.decode("utf-8", errors="replace").splitlines():
         parts = line.split(None, 4)
+        # `wmctrl -lp` columns: id desktop pid machine title — the pid is [2]
+        # (int([3]) was the machine name: every window was silently skipped)
         if len(parts) >= 5:
             try:
-                out.append((parts[0], int(parts[3]), parts[4]))
+                out.append((parts[0], int(parts[2]), parts[4]))
             except ValueError:
                 pass
     return out
@@ -1618,9 +1629,12 @@ class Daemon:
                 return "dictation.ptt: handy absent"
             xdo_hold(chord, True)
             self.dictation_held = True
+            self._ptt_press_at = time.monotonic()
+            log("ptt: keydown", chord)
             return "dictation.ptt keydown " + chord
         if self.dictation_held:
             self.dictation_held = False
+            log("ptt: keyup after %.2fs" % (time.monotonic() - getattr(self, "_ptt_press_at", 0.0)))
             xdo_hold(chord, False)
             return "dictation.ptt keyup " + chord
         return None
@@ -1640,13 +1654,20 @@ class Daemon:
         directory = str((row.get("location") or {}).get("directory") or "")
         oc_title = "OC | " + title
         if self.orca.binary and self.orca.running():
-            for term in self.orca.terminals():
-                if not isinstance(term, dict):
-                    continue
-                if term.get("title") == oc_title or (directory and term.get("worktreePath") == directory):
-                    self.orca.switch_terminal(term.get("handle"))
-                    raise_pids(pids_named("orca-ide"))
-                    return "orca"
+            terms = [t for t in self.orca.terminals() if isinstance(t, dict)]
+            # title match first (Orca truncates long titles — then the worktree
+            # fallback, preferring the row that looks like an OC tab so a bare
+            # terminal in the same worktree never hijacks the raise)
+            match = next((t for t in terms if t.get("title") == oc_title), None)
+            if match is None and directory:
+                oc_rows = [t for t in terms if t.get("worktreePath") == directory
+                           and str(t.get("title") or "").startswith("OC |")]
+                match = oc_rows[0] if oc_rows else next(
+                    (t for t in terms if t.get("worktreePath") == directory), None)
+            if match:
+                self.orca.switch_terminal(match.get("handle"))
+                raise_pids(pids_named("orca-ide"))
+                return "orca"
         if raise_title(oc_title):
             return "wmctrl"
         return None
