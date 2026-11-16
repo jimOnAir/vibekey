@@ -1087,7 +1087,7 @@ class RingOverlay(QWidget):
     it previews underneath keep working; the wheel Eases between detents like
     the HTML prototype the owner approved."""
 
-    W, H = 760, 560
+    W, H = 880, 620
     RX, RY = 250.0, 165.0
 
     def __init__(self):
@@ -1126,43 +1126,85 @@ class RingOverlay(QWidget):
             self.update()
         return False
 
-    # ---- carousel geometry -------------------------------------------------
-    # 13 cards around an ellipse gave ~100 px per slot against cards up to
-    # 250 px wide: labels crawled over each other (owner 2026-11-16 "too
-    # dense"). A vertical carousel (cover flow for a knob — a rotary list)
-    # keeps every label on its own row: one column, selection center,
-    # neighbors receding with eased depth. Same picker state, same easing.
-    STEP = 78.0        # px between slots
-    WINDOW = 3         # slots shown each side of the selection
+    # ---- ring geometry -------------------------------------------------------
+    # The Wheel IS a ring (owner 2026-11-16: "still must be a ring") — but 13
+    # cards at 360/13=27.7° on a 250px ellipse pack ~100px per slot against
+    # 250px-wide cards: the label crawl was built into the angle math. Cards
+    # now ride the FRONT ARC at a fixed 40° pitch (Ferris wheel: the bottom
+    # reads first, sides rise and fade), the rim carries the whole ring, and
+    # far slots simply have no card. Same picker state, same easing.
+    RX, RY = 340.0, 235.0     # rim ellipse
+    STEP_DEG = 40.0           # card pitch along the front arc
+    WINDOW = 3                # card slots each side of the selection
 
-    def _depth(self, i, n):
-        """Signed slot distance from the selection along the nearest wrap."""
-        d = (i - self.cur) % n
-        return d - n if d > n / 2.0 else d
+    def _place(self, k):
+        """(x, y, scale, opacity) of the card k slots from the selection."""
+        import math
+        a = math.radians(k * self.STEP_DEG - 90.0)   # -90° = the bottom
+        cx, cy = self.width() / 2.0, self.height() * 0.44
+        d = abs(k)
+        return (cx + self.RX * math.cos(a), cy - self.RY * math.sin(a),
+                max(0.62, 1.0 - d * 0.125), max(0.30, 1.0 - d * 0.24))
 
     def paintEvent(self, _ev):
+        import math
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        cx = self.width() / 2.0
-        cy = self.height() / 2.0 + 4
         n = len(self.items)
-        for i in sorted(range(n), key=lambda i: -abs(self._depth(i, n))):
-            if abs(self._depth(i, n)) > self.WINDOW + 0.5:
+        cx, cy = self.width() / 2.0, self.height() * 0.44
+        # the rim: the whole ring is visible even where cards are not
+        p.setPen(QPen(QColor(255, 255, 255, 26), 2))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(QRectF(cx - self.RX, cy - self.RY, 2 * self.RX, 2 * self.RY))
+        def depth(i):
+            d = (i - self.cur) % n
+            return d - n if d > n / 2.0 else d
+        sel = round(self.cur) % n if n else 0
+        # rim markers for every Session (they slide with the turn)
+        for i in range(n):
+            k = depth(i)
+            a = math.radians(k * self.STEP_DEG - 90.0)
+            x, y = cx + self.RX * math.cos(a), cy - self.RY * math.sin(a)
+            p.setBrush(QColor("#7c3aed") if i == sel else QColor(255, 255, 255, 60))
+            p.setPen(Qt.NoPen)
+            r = 4.0 if i == sel else 2.5
+            p.drawEllipse(QRectF(x - r, y - r, 2 * r, 2 * r))
+        self._hub(p, cx, cy, sel)
+        # cards: far slots first (painter's order toward the viewer)
+        for i in sorted(range(n), key=lambda i: -abs(depth(i))):
+            k = depth(i)
+            if abs(k) > self.WINDOW + 0.5:
                 continue
-            self._card(p, i, cx, cy + self._depth(i, n) * self.STEP)
+            self._card(p, i, *self._place(k))
         p.setPen(QColor("#8b94a0"))
         p.setFont(QFont("sans", 10))
         p.drawText(self.rect().adjusted(0, 0, 0, -8), Qt.AlignHCenter | Qt.AlignBottom,
                    "turn = select  ·  press = switch  ·  Close slot / ✕ / 15 s idle = dismiss")
 
-    def _card(self, p, i, x, y):
+    def _hub(self, p, cx, cy, sel):
+        r = 59.0
+        grad = QRadialGradient(cx - r * 0.3, cy - r * 0.4, r * 1.9, cx - r * 0.3, cy - r * 0.4)
+        grad.setColorAt(0.0, QColor("#9d7bf7"))
+        grad.setColorAt(0.55, QColor("#7c3aed"))
+        grad.setColorAt(1.0, QColor("#4c1ea6"))
+        p.setPen(QPen(QColor(124, 58, 237, 120), 14))   # ambient glow
+        p.setBrush(grad)
+        p.drawEllipse(QRectF(cx - r, cy - r, 2 * r, 2 * r))
+        sessions = sum(1 for it in self.items if str(it.get("id")) != "__close__")
+        on_close = str(self.items[sel].get("id")) == "__close__" if self.items else False
+        p.setPen(QColor("#ffffff"))
+        p.setFont(QFont("sans", 24, QFont.Bold))
+        p.drawText(QRectF(cx - r, cy - 26, 2 * r, 34), Qt.AlignCenter,
+                   "✕" if on_close else "%d/%d" % (sel + 1, sessions))
+        p.setFont(QFont("sans", 8))
+        p.setPen(QColor(255, 255, 255, 210))
+        p.drawText(QRectF(cx - r, cy + 8, 2 * r, 16), Qt.AlignCenter,
+                   "C L O S E" if on_close else "S E S S I O N")
+
+    def _card(self, p, i, x, y, scale, op):
         it = self.items[i]
         is_close = str(it.get("id")) == "__close__"
-        n = max(1, len(self.items))
-        d = abs(self._depth(i, n))
-        cur = (round(self.cur) % n) == i
-        scale = max(0.66, 1.0 - d * 0.105)
-        op = max(0.32, 1.0 - d * 0.24)
+        cur = (round(self.cur) % len(self.items)) == i
         title = str(it.get("title") or "")
         host = str(it.get("host") or "")
         f_t = QFont("sans")
@@ -1170,27 +1212,24 @@ class RingOverlay(QWidget):
         f_t.setBold(True)
         f_h = QFont("sans")
         f_h.setPointSizeF(9.0 * scale)
-        w = (110 if is_close else max(170, min(250, QFontMetrics(f_t).horizontalAdvance(title) + 36))) * scale
+        w = (110 if is_close else max(170, min(230, QFontMetrics(f_t).horizontalAdvance(title) + 36))) * scale
         h = (52 if not is_close else 40) * scale
-        if cur:
-            w, h = int(w * 1.12), int(h * 1.12)
         rect = QRectF(x - w / 2, y - h / 2, w, h)
         p.setOpacity(op)
-        if cur:  # violet glow behind the selected card
+        if cur:  # violet glow behind the selected card (bottom of the wheel)
             glow = QRectF(rect).adjusted(-6, -6, 6, 6)
             p.setPen(QPen(QColor(124, 58, 237, 110), 7))
             p.setBrush(Qt.NoBrush)
             p.drawRoundedRect(glow, 15, 15)
         p.setPen(QPen(QColor("#a78bfa") if cur else QColor(255, 255, 255, 60), 1.5 if cur else 1))
         close_dim = QColor(70, 74, 82, 210) if is_close else QColor(18, 20, 26, 205)
-        p.setBrush(QColor(124, 58, 237, 210) if (cur and not is_close) else
-                   (QColor(124, 58, 237, 150) if cur else close_dim))
+        p.setBrush(QColor(124, 58, 237, 210) if cur else close_dim)
         p.drawRoundedRect(rect, 12, 12)
         p.setPen(QColor("#ffffff" if cur else ("#9aa3ad" if is_close else "#eff0f1")))
         p.setFont(f_t)
         p.drawText(rect, Qt.AlignCenter, title if is_close else
                    QFontMetrics(f_t).elidedText(title, Qt.ElideRight, int(rect.width() - 20)))
-        if not is_close and scale > 0.8:
+        if not is_close and scale > 0.85:
             p.setPen(QColor(154, 163, 173, int(255 * op)))
             p.setFont(f_h)
             p.drawText(QRectF(rect.left(), rect.top() + rect.height() * 0.52, rect.width(), rect.height() * 0.3),
