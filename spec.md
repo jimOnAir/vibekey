@@ -96,9 +96,14 @@ building **one-shot** combos; PTT-style holds use `command`/`release_command`
   handy's Dictation (ticket 2: XTEST fake events activate the Tauri backend's
   root-window `XGrabKey` passive grab, both edges delivered, no `send_event`
   filtering, KWin nowhere in the chain).
-- The unit must start `After=graphical-session.target` because `xdotool` needs
-  `DISPLAY`/`XAUTHORITY` (present via Plasma's user-manager env import, probed);
-  `spawn()` swallows failures silently (§9, risk R3).
+- The user unit starts with `WantedBy=default.target`; `After=graphical-session.target`
+  alone is **not sufficient** (ordering does not cross targets — field-proven on a
+  fresh boot 2026-11-16: the Daemon won the race, had no `DISPLAY`/`XAUTHORITY`,
+  and every `xdotool` exited 1). The real mitigation is the Daemon's **X-env
+  self-heal**: every 5 s until resolved (and a forced resync whenever an
+  `xdotool`/`wmctrl` command fails), it copies `DISPLAY`/`XAUTHORITY` from a live
+  `plasmashell`/`kwin_x11` process — trusting only existing cookie files. Verified:
+  a daemon started with both vars stripped heals itself in ~4 s.
 - Failure logging: every spawn with non-zero exit gets logged to the journal and
   surfaced as a `state.json` `last.error` so the Panel status line can
   narrate it (upstream swallowed these — port risk R3 mitigation).

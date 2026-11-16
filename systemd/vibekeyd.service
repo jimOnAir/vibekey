@@ -1,7 +1,9 @@
 [Unit]
 Description=vibekey AU05 daemon
-# xdotool needs DISPLAY/XAUTHORITY from the graphical session (port-audit R3);
-# spawn() swallows failures silently, so order the unit after the session.
+# xdotool needs DISPLAY/XAUTHORITY. Ordering tricks are not enough (an
+# After= line cannot order against a unit pulled by a different target), and
+# on a fresh boot the service can beat Plasma's env import — so the Daemon
+# self-heals its X environment from the live desktop process (§2.2, spec).
 After=graphical-session.target
 
 [Service]

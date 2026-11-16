@@ -27,17 +27,18 @@ Preview. (Tray-only is fine.)
 
 ## `xdotool … exit 1` in the status line / notifications
 
-The Daemon's X authorisation is stale — it was started with an
-`XAUTHORITY` cookie from a dead session (typical after logout/login dances
-around the setup). The systemd unit gets `DISPLAY`/`XAUTHORITY` imported by
-Plasma at login, so after a genuine re-login:
+The Daemon's X authorisation was missing or stale — typically the service
+started before Plasma imported `DISPLAY`/`XAUTHORITY` into the user manager
+(fresh-boot race). From the build with the **X-env self-heal** this resolves
+itself within seconds (the Daemon copies the live values from
+`plasmashell`/`kwin_x11`, and re-syncs whenever an injected key fails); on
+older installs:
 
 ```bash
-systemctl --user restart vibekeyd
+systemctl --user restart vibekeyd     # Plasma's env is in place by now
 ```
 
-If you're babysitting a temporary instance instead, start it with the *live*
-session's values (`tr '\0' '\n' < /proc/$(pgrep -u $UID -x plasmashell)/environ | grep -E '^(DISPLAY|XAUTHORITY)'`).
+Check with `tr '\0' '\n' < /proc/$(pgrep -f vibekeyd | head -1)/environ | grep -E '^(DISPLAY|XAUTHORITY)'`.
 
 ## Mic key: no recording, no text
 

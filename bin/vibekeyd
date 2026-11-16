@@ -543,6 +543,60 @@ def reap_children(report=None):
     _children[:] = still
 
 
+# ---------------------------------------------------------------------------
+# X environment self-heal (owner report 2026-11-16: after a fresh boot the
+# enabled user service can start before Plasma's import-environment, so the
+# Daemon has no DISPLAY/XAUTHORITY and every xdotool exits 1)
+# ---------------------------------------------------------------------------
+
+X_DESKTOP_COMMS = ("plasmashell", "kwin_x11")
+
+
+def x_env_from_proc(raw_env):
+    """(DISPLAY, XAUTHORITY) from a desktop process's environ bytes, only when
+    the cookie file actually exists (a deleted one is a dead session)."""
+    kv = dict(x.split(b"=", 1) for x in raw_env.split(b"\0") if b"=" in x)
+    disp = kv.get(b"DISPLAY", b"").decode(errors="replace")
+    xauth = kv.get(b"XAUTHORITY", b"").decode(errors="replace")
+    if disp and xauth and os.path.isfile(xauth):
+        return disp, xauth
+    return None
+
+
+def x_env_ok():
+    return bool(os.environ.get("DISPLAY")) and \
+        os.path.isfile(os.environ.get("XAUTHORITY") or "/nonexistent")
+
+
+def resolve_x11_env(force=False):
+    """True when DISPLAY/XAUTHORITY look usable afterwards. Copies the values
+    from a live KDE process — the only trustworthy mirror of the running X11
+    session; plain :0 is assumed when DISPLAY is entirely absent."""
+    if not os.environ.get("DISPLAY"):
+        os.environ["DISPLAY"] = ":0"
+    if not force and x_env_ok():
+        return True
+    me = os.getuid()
+    for pid in (d for d in os.listdir("/proc") if d.isdigit()):
+        try:
+            with open("/proc/%s/comm" % pid) as h:
+                comm = h.read().strip()
+            if comm not in X_DESKTOP_COMMS:
+                continue
+            if os.stat("/proc/%s" % pid).st_uid != me:
+                continue
+            with open("/proc/%s/environ" % pid, "rb") as h:
+                found = x_env_from_proc(h.read())
+        except (OSError, ValueError):
+            continue
+        if found:
+            if (os.environ.get("DISPLAY"), os.environ.get("XAUTHORITY")) != found:
+                log("X env self-healed from %s: %s" % (comm, found[1]))
+                os.environ["DISPLAY"], os.environ["XAUTHORITY"] = found
+            return True
+    return x_env_ok()
+
+
 def notify(title, body):
     spawn(["notify-send", "-a", "vibekey", title, body])
 
@@ -1387,6 +1441,8 @@ class Daemon:
         self.next_rescan = 0.0
         self.next_battery = 0.0
         self.next_config = 0.0
+        self.xenv_ok = False          # X self-heal state (see resolve_x11_env)
+        self.next_xenv = 0.0
         # wireless link tracking (vendor replies and input events prove the
         # keypad is awake; silence means asleep/off — mic idle too)
         self.last_contact = 0.0
@@ -1972,13 +2028,29 @@ class Daemon:
         except OSError as error:
             log("manage_lights request failed:", error)
 
+    def ensure_x_env(self, now):
+        """Retry the X self-heal until the session env is in place (a fresh
+        boot gives Plasma a few seconds to exist, let alone import)."""
+        if self.xenv_ok or now < self.next_xenv:
+            return
+        self.next_xenv = now + 5.0
+        self.xenv_ok = resolve_x11_env()
+
+    def report_failure(self, msg):
+        self.state.set(last_error=msg)
+        # a failed X-dependent command can mean a rotated cookie file — resync
+        if ("xdotool" in msg or "wmctrl" in msg) and self.xenv_ok:
+            log("X-dependent command failed — re-reading the desktop's X env")
+            self.xenv_ok = resolve_x11_env(force=True)
+
     def run(self):
         log("config:", CONFIG_PATH)
         log("state:", STATE_PATH)
         self.state.set(knob_mode={"id": self.current_mode_id(), "label": self.current_mode_label()})
         while self.running:
             now = time.monotonic()
-            reap_children(lambda msg: self.state.set(last_error=msg))
+            self.ensure_x_env(now)
+            reap_children(self.report_failure)
             if now >= self.next_config:
                 self.next_config = now + CONFIG_POLL
                 if self.config.reload():
