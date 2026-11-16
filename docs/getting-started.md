@@ -62,7 +62,12 @@ Open **vibekey Panel** (applications menu, or `vibekey-panel`).
 - The left half is a **drawing of your device**. A single click on a cap or the
   knob *simulates* it (status line, `[RAN (sim)]`); a **double-click opens the
   picker** so you can reassign it.
-- The **header** shows the live Knob mode, turn position, and battery.
+- The **header** shows where the **Ring** points (`Session 2/6 — title`), and battery.
+- **Ring & Wheel**: press the knob and a **Wheel** of your Sessions opens over
+  the screen — turn to select (each Session's Host raises live underneath),
+  press again to confirm, ✕ or 10 s idle to close. Long-press remains
+  `Enter` — the gesture that accepts an agent's permission prompt
+  ([docs/presets.md](presets.md#the-ring--the-wheel)).
 - The **status line** narrates everything the Daemon sees — while the Panel
   window is open, **Preview** is on by default: events are *reported*, nothing
   *runs*. Close the window (or uncheck Preview) and your Assignments fire.
@@ -75,8 +80,7 @@ Open **vibekey Panel** (applications menu, or `vibekey-panel`).
   minutes, sleep/power-off ("Never" included), and the dual-mic noise
   reduction — **Apply to the AU05** writes them into the device (consented;
   the values shown afterwards are read back from it).
-- The tray icon mirrors the Knob mode with a corner glyph
-  ![tray modes](images/tray-modes.png), grows an orange **!** when the Daemon
+- The tray icon grows an orange **!** when the Daemon
   needs attention, and shows an orange **mic-with-slash** badge whenever your
   **Dictation mic is unusable**: the AU05 Dongle is unplugged, the keypad is
   **asleep or switched off** (its USB/mic nodes stay — the Daemon asks the

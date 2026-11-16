@@ -13,7 +13,8 @@ never having two hands on the wheel.
 
 | Signal | Where | Meaning |
 |---|---|---|
-| **Ring pattern** | knob ring | the current **Knob mode**, at a glance, screen-free |
+| **Ring pattern** | knob ring | your pulse, at a glance, screen-free (default `heartbeat:8`) |
+| **Alarm override** | knob ring | fast double-tick while the Cursor Session waits for approval |
 | **Failure blink** | the culprit keycap, 3 fast blinks | *that* press you just made did not work |
 | **Battery breathe** | knob ring, slow | ≤ 10 %, until you charge (one notification per crossing) |
 
@@ -53,11 +54,11 @@ A pattern string says *what the ring does*:
 | `gallop` | three-beat clip-clop | 2.2 s | `▄█▂▅█▂▇▁ …` |
 | `alarm` | urgent double-tick (reserved: §see below) | 1.4 s | `█▁█▁▄▁ …` |
 
-Defaults out of the box: **Scroll `off` · Sessions `heartbeat:8` · Volume
-`breathe:8`** — silence for the idle case, a living pulse where a Session is
-the point, the firmware's own smooth breath for the transient one. Any custom
-Knob mode without a pattern stays dark until you name one; unknown rhythm
-names fall back to `off`, never a crash.
+Default out of the box: **`heartbeat:8`** — one living pulse for the dial
+that points at your Sessions. Set it with the single `lighting.pattern` key
+(the old per-mode `patterns` map still loads, `Sessions` entry wins, for
+config compatibility). Unknown rhythm names fall back to `off`, never a
+crash.
 
 Rhythm cycles are queued as timed writes on the single writer; switching Knob
 mode flushes the running cycle, so two rhythms never stutter over each other.

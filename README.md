@@ -25,18 +25,21 @@ OpenCode/Orca agent Presets — planned entirely as a
 | 🎙 **Voice key** | **Dictation** | hold-to-talk via [handy](docs/presets.md#dictation) — release, and text appears (~0.5–2 s) |
 | ✓ **Confirm** | **Next Session** | step the Ring of OpenCode Sessions; raises each Session's Host |
 | ✕ **Cancel** | **Interrupt** | stop the agent — API-first, never `Ctrl+C` |
-| **Knob press** | cycle **Knob mode** | `Scroll → Sessions → Volume`, announced by ring, tray, and a notification |
+| **Knob press** | open/close the **Wheel** | the on-screen **Ring** of Sessions — press again to confirm where you landed |
 | **Knob long-press** | `Enter` | accepts agent permission prompts without touching the keyboard |
-| **Knob turn** | current Knob mode | scroll the page, step the Ring, or nudge volume |
+| **Knob turn** | step the **Ring** | selects the next/previous Session and raises its Host live, under the Wheel |
 
 Every Control is reassignable from the Panel — presets, key combos, or shell
 commands ([docs/presets.md](docs/presets.md)).
 
-And it lights up: the knob **ring indicates the Knob mode** with hand-tuned
-rhythms, culprit keycaps blink on failure, and the ring breathes when the
-battery runs low ([docs/lighting.md](docs/lighting.md)).
+And it lights up: the knob ring pulses hand-tuned **rhythms**, flashes an
+**alarm** when your agent waits for approval, culprit keycaps blink on
+failure, and the ring breathes when the battery runs low
+([docs/lighting.md](docs/lighting.md)).
 
-![Tray shows the Knob mode](docs/images/tray-modes.png)
+![The Session Wheel](docs/images/ring-overlay.png)
+
+![Tray states: ready, attention, no microphone](docs/images/tray-modes.png)
 
 ## Install
 

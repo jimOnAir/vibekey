@@ -78,16 +78,23 @@ The window or terminal where a Session runs; a Session step raises its Host.
 _Avoid_: container, pane
 
 **Ring**:
-The Daemon's ordered cycle it steps through for *next/previous Session*.
-_Avoid_: carousel, list, queue
+The Daemon's ordered cycle it steps through for *next/previous Session*;
+shown visually by the **wheel** (knob press).
+_Avoid_: carousel, list, queue, dial
+
+**Wheel**:
+The on-screen Session Ring overlay (Panel) mirroring the Daemon's `picker`
+state — turn selects, press confirms.
+_Avoid_: popup, menu, spinner
 
 **Cursor**:
 The Daemon's position in the Ring; may drift from what the user views manually.
 _Avoid_: pointer, index
 
 **Knob mode**:
-The active Preset for knob-turn; cycled by knob press.
-_Avoid_: knob setting, dial mode
+Retired 2026-11-16 (owner decision): knob turns and presses belong to the
+Session Ring; there is no mode to cycle. Historical texts may mention it.
+_Avoid_: in new prose entirely; also knob setting, dial mode, scroll mode
 
 **Manage lights**:
 The consented Panel action that sets the Device lighting mode to Working and

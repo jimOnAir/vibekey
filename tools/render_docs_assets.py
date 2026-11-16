@@ -49,7 +49,8 @@ def demo_state(tmp):
     state = {
         "version": 1, "pid": 4242, "connected": True, "access": "ok",
         "grabbed": True, "mouse_passthrough": False, "preview": True,
-        "knob_position": 12, "knob_mode": {"id": "sessions", "label": "Sessions"},
+        "ring": {"index": 1, "total": 6, "title": "OC | vibekey — port", "host": "Orca · vibekey"},
+        "picker": None,
         "device": {"name": "Ulanzi Vibekey", "inputs": ["AU05 Consumer", "AU05 Mouse", "AU05 Keyboard"],
                    "vendor_channel": True},
         "battery": {"percent": 87, "charging": False, "voltage_mv": 4010, "at": 0},
@@ -65,7 +66,6 @@ def demo_state(tmp):
     }
     config = {
         "grab": True, "battery": True, "aliases": {},
-        "knob_modes": ["scroll", "sessions", "volume"],
         "buttons": {
             "key1": {"preset": "dictation_ptt", "label": "Dictation (hold, handy)",
                      "behavior": "dictation.ptt", "keys": "ctrl+alt+space"},
@@ -109,17 +109,15 @@ def render_panel(app):
 
 
 def render_tray_grid(app):
-    labels = ["Scroll", "Sessions", "Volume", "custom mode", "attention", "no microphone"]
-    modes = [("scroll", "Scroll"), ("sessions", "Sessions"), ("volume", "Volume"),
-             (None, "Монитор"), ("sessions", "Sessions"), ("sessions", "Sessions")]
-    warns = [False, False, False, False, True, False]
-    mics = [False, False, False, False, False, True]
+    labels = ["ready", "attention", "no microphone"]
+    warns = [False, True, False]
+    mics = [False, False, True]
     cell = 44
     img = QImage(len(labels) * cell, cell + 2, QImage.Format_RGB32)
     img.fill(QColor("#232629"))
     p = QPainter(img)
-    for i, ((mid, mlabel), warn, mic) in enumerate(zip(modes, warns, mics)):
-        pm = vkpanel.app_icon_pixmap(32, warn=warn, mode_id=mid, mode_label=mlabel, mic_off=mic)
+    for i, (warn, mic) in enumerate(zip(warns, mics)):
+        pm = vkpanel.app_icon_pixmap(32, warn=warn, mic_off=mic)
         p.drawImage(QRectF(i * cell + 6, 4, 32, 32),
                     pm.toImage().scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation))
     p.end()
@@ -160,6 +158,30 @@ def main():
     render_panel(app)
     render_tray_grid(app)
     render_glyphs(app)
+    render_ring(app)
+
+
+
+
+def render_ring(app):
+    picker = {"open": True, "index": 1, "at": 0, "items": [
+        {"id": "s%d" % i, "title": t, "host": h} for i, (t, h) in enumerate([
+            ("OC | vibekey — port", "Orca · vibekey"), ("OC | nanox — router", "Orca · nanox"),
+            ("OC | meta — paved-roads", "Orca · meta"), ("vibekey research", "term · konsole"),
+            ("OC | orca-review", "Orca · review"), ("kernel notes", "term · yakuake")])]}
+    ov = vkpanel.RingOverlay()
+    ov.sync(picker)
+    for _ in range(40):
+        ov.step_anim()
+    shot = ov.grab().toImage()
+    canvas = QImage(shot.size(), QImage.Format_ARGB32)
+    canvas.fill(QColor("#15171c"))          # the wheel lives over dark desktops
+    cp = QPainter(canvas)
+    cp.drawImage(0, 0, shot)
+    cp.end()
+    canvas.save(os.path.join(DOCS_IMG, "ring-overlay.png"))
+    ov.sync(None)
+    print("wrote docs/images/ring-overlay.png")
 
 
 if __name__ == "__main__":

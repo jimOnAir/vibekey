@@ -108,11 +108,12 @@ it resolves the shim in `~/.config/orca/linux-orca-cli-shim/orca`, the
 installed `/opt/stably-orca/...` path, or your `orca_cli` override, in that
 order. If Orca moved, set `orca_cli`.
 
-## Wheel doesn't scroll
+## I miss knob-scroll / knob-volume
 
-Scroll pass-through requires the current **Knob mode** to be `Scroll`
-(cycle with a press — the tray glyph and a notification confirm) *and* the
-Panel window closed (Preview holds the wheel back on purpose).
+Knob modes were retired 2026-11-16 — the dial is the Session Ring now. The
+capability moved to the buttons: assign the Media Presets (volume up/down,
+play/pause…) or any key combo to a Control in the Panel; the knob's native
+wheel events stay Grabbed, so they never leak into your apps.
 
 ## `Quit` in the tray doesn't stick
 

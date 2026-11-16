@@ -8,7 +8,7 @@ nothing here needs re-deciding.
 
 Vocabulary follows [`GLOSSARY.md`](GLOSSARY.md) and is binding: Control, Dongle,
 Grab, Preview, Alias, Assignment, Preset, Dictation, Daemon, Panel, Session, Host,
-Ring, Cursor, Knob mode. "key" always means an X11 keyboard key; the physical
+Ring, Cursor, Wheel (Knob mode retired 2026-11-16). "key" always means an X11 keyboard key; the physical
 inputs are Controls.
 
 Source of port: `jimmibram/vibekey-driver` @ `41ba904b` (MIT). Upstream code is
@@ -38,8 +38,9 @@ Three pieces, one package:
 1. **`vibekeyd`** — resident Python (stdlib-only, as upstream) user service.
    Opens the Dongle's hidraw nodes, `EVIOCGRAB`s the matching evdev nodes —
    **every one except the wheel node** upstream passes through by evdev-`name`
-   match on "mouse" (`vibekeyd:601-602`; the **Grab** exemption the `scroll`
-   Knob mode and risk R8 depend on) — drains grabbed fds so `select()` doesn't
+   match on "mouse" (`vibekeyd:601-602`; the **Grab** exemption risk R8
+   described — with knob modes retired the exemption is gone and all nodes
+   are grabbed unconditionally) — drains grabbed fds so `select()` doesn't
    spin, decodes HID reports into the six Controls, runs Assignments, owns the
    `lighting` subsystem (§5), polls battery (15 s vendor keepalive, §5.6),
    writes `state.json`.
@@ -117,7 +118,8 @@ Config dir `~/.config/vibekey/`, runtime dir `$XDG_RUNTIME_DIR/vibekey/`:
 | `config.json` | only via `vibekey-config` (atomic replace) | Daemon (0.5 s mtime poll + SIGHUP), Panel | schema §4 |
 | `seen.json` | Daemon (per press) | Panel | learned raw ids for Alias UX |
 | `actions.json` (catalogue) | package (`/usr/lib/vibekey/actions.json`) | Daemon (seed + behavior-presets), Panel (picker) | resolved relative to the package dir, **not** `bin/`-relative — a wrong path silently no-ops first-run seeding (risk R6) |
-| `state.json` | Daemon only, rewritten in place on every event | Panel (`QFileSystemWatcher` + 1 s/5 s poll) | fields: upstream set (`version,pid,connected,access,grabbed,mouse_passthrough,preview,knob_position,device,battery,last,events,error,updated`) **plus** `knob_mode` (§5.3), `last_error` (§5.3 failure surface), `keypad` (`online`, `at` — wireless-link state, §5.6), `power` (`standby_s`, `sleep_s`, `enc` — device telemetry, §5.7), `attention` (`sid` while an agent awaits approval, else `null`, §5.7) and `lighting` incl. `device_mode`: `0|1|2|"unknown"|"disabled"`, `pending_mode`, `last_error` (§5.5) |
+| `state.json` | Daemon only, rewritten in place on every event | Panel (`QFileSystemWatcher` + 1 s/5 s poll) | fields: upstream set (`version,pid,connected,access,grabbed,mouse_passthrough,preview,knob_position,device,battery,last,events,error,updated`) **plus** `ring{index,total,title,host}` + `picker{open,items,index}` (§5.3,
+  the Wheel), `last_error` (§5.3 failure surface), `keypad` (`online`, `at` — wireless-link state, §5.6), `power` (`standby_s`, `sleep_s`, `enc` — device telemetry, §5.7), `attention` (`sid` while an agent awaits approval, else `null`, §5.7) and `lighting` incl. `device_mode`: `0|1|2|"unknown"|"disabled"`, `pending_mode`, `last_error` (§5.5) |
 | `preview` | Panel (`open` every 2 s while shown, `closed` on hide) | Daemon (trusts `open` for 6 s) | while active: events are reported, nothing runs |
 | `manage_lights` | Panel (one-shot `"manage"`) | Daemon (consumes + unlinks on its 0.5 s poll) | the consented Manage lights request (§5.5) — the Panel never touches the vendor channel |
 | `power` | Panel (one-shot JSON: `standby_s`/`sleep_s`/`enc`) | Daemon (consumes) | consented device power & noise-reduction writes (§5.7); every write is read back |
@@ -134,7 +136,6 @@ vs *RAN (sim)* for its own simulated clicks (§8).
   "grab": true,
   "battery": true,
   "aliases": { "kbd:0x46": "knob" },
-  "knob_modes": ["scroll", "sessions", "volume"],
   "buttons": {
     "key1": {"preset": "dictation_ptt", "label": "Dictation (hold, handy)",
              "behavior": "dictation.ptt", "keys": "ctrl+alt+space"},
@@ -146,7 +147,7 @@ vs *RAN (sim)* for its own simulated clicks (§8).
   "lighting": {
     "mode_ring": true, "fail_blink": true, "low_battery": true,
     "brightness": 1.0,
-    "patterns": { "Scroll": "off", "Sessions": "heartbeat:8", "Volume": "breathe:8" }
+    "pattern": "heartbeat:8"   // legacy per-label "patterns" map still loads
   }
 }
 ```
@@ -154,9 +155,8 @@ vs *RAN (sim)* for its own simulated clicks (§8).
 - **Slots** (upstream `SLOT_LABELS`, kept — all six remain *detected*): `key1`
   Voice · `key2` ✓ Confirm · `key3` ✕ Cancel · `knob` press · `knob_right` ·
   `knob_left`. **User-assignable in v1: `key1`/`key2`/`key3`** (picker) and the
-  turn modes via `knob_modes`; `knob` is fixed behaviour (§5.3), and
-  `knob_right`/`knob_left` resolve through the current Knob mode (§4,
-  `knob_modes`), not through config `buttons` entries. Slot resolution from raw
+  `knob`/`knob_right`/`knob_left` are fixed behaviour (§5.3, Wheel + Ring
+  step — knob modes retired 2026-11-16), not config `buttons` entries. Slot resolution from raw
   ids is upstream's `DEFAULT_SLOTS` table (`kbd:0x01`/`kbd:super+0x0b`→key1,
   `kbd:0x28`→key2, `kbd:0x29`→key3, `kbd:0x46`→knob, wheel and
   `kbd:0x4f`/`kbd:0x2a`→knob_right/left); the `aliases` map wins over it, as upstream.
@@ -168,20 +168,20 @@ vs *RAN (sim)* for its own simulated clicks (§8).
   `release_command`/`release_keys` on the release edge, as upstream).
   `vibekey-config`'s `ALLOWED_BUTTON_KEYS` gains `behavior` + `keys`/`label` as
   already allowed.
-- **`knob_modes`** — ordered list of catalogue `knob_turn` ids; knob press cycles
-  it; runtime state resets to the first entry at boot; default
-  `["scroll","sessions","volume"]` (ticket 6). Missing → the default. This
-  **replaces upstream's per-config `knob_right`/`knob_left` entries**: turn events
-  resolve against the catalogue entry of the *current* mode (which therefore
-  stays available; the copied-fields trick no longer applies to knob turn).
+- **`knob_modes`** — **retired 2026-11-16** (owner: "мне не нужны другие
+  режимы, только выбор сессии"). The knob is dedicated to the Session Ring
+  (§5.3): turn = Ring step, press = Wheel toggle/confirm, long-press = Enter.
+  A `knob_modes` key in an existing config is read and ignored (no migration,
+  no error); catalogue `knob_turn` and the `sessions.turn` behavior are gone;
+  Media/key Presets stay assignable to buttons to cover volume/scroll wishes.
 - **`lighting`** — exactly the block accepted in ticket 11, with the rhythm
   extension (owner request, 2026-11-15). `patterns` values are strings
-  addressed by Knob-mode **label**; a mode with no entry → `off`. Grammar:
+  addressed by `pattern` now (the legacy per-**label** map still loads, its
+  `Sessions` entry winning). Grammar:
   `off` | `solid:<0-20>` | `breathe:<0-20>` | `<rhythm>[:<level>[:<period_ms>]]`
   where `<rhythm>` ∈ `pulse` · `heartbeat` · `tick` · `wave` · `gallop` (host-driven
   sequences, §5.5; level default 8) · `alarm` (reserved for §5.7's
-  awaiting-approval override). Code defaults:
-  `Scroll:off`, `Sessions:heartbeat:8`, `Volume:breathe:8`.
+  awaiting-approval override). Default: `heartbeat:8`.
   `brightness` is a multiplier (0.0–1.0) applied to every level the lighting
   module writes (effective level = level × brightness).
   Hot-reloaded by the existing 0.5 s config poll. The switches are feature
@@ -190,10 +190,10 @@ vs *RAN (sim)* for its own simulated clicks (§8).
 - **`grab`** / **`battery`** / **`aliases`**: upstream semantics; `battery` now
   also gates the link-keepalive probe (§5.6) — with it off, link state stays
   optimistic.
-- The `knob` slot is **fixed behaviour in v1** (§5.3): press = Knob-mode cycle,
-  long-press = Enter injection (ticket 6 — not a user Assignment; upstream's
-  `knob: key_enter` default is subsumed by that fixed behaviour).
-- No migration code: every new field (`knob_modes`, `lighting`, `behavior`) has
+- The `knob` slot is **fixed behaviour** (§5.3): press = Wheel toggle/confirm,
+  long-press = Enter injection — not a user Assignment (ticket 6's fixed
+  behaviour, extended by the Wheel decision 2026-11-16).
+- No migration code: every new field (`lighting`, `behavior`, `pattern`) has
   its default in code when absent, so upgrades never touch user config.
 
 ### 4.2 `behavior` presets — schema change and rationale
@@ -212,7 +212,7 @@ working for command/keys presets). Allow-list:
 | `session.focus` | 5.3 |
 | `session.interrupt` | 5.3 |
 | `orca.worktree.next` / `orca.worktree.prev` | 5.3 |
-| `sessions.turn` (knob_turn side entry) | 5.3 |
+| ~~`sessions.turn` / `knob_turn`~~ | retired 2026-11-16 (§5.3) |
 
 Unknown `behavior` in config → do nothing, log, `state.json` `error`.
 
@@ -251,10 +251,9 @@ entirely** — documented known gap (ticket 6).
 ### 5.3 Agent Presets (ticket 6, on tickets 3/4's mechanisms)
 
 **Control map**: ✓ Confirm = *next Session* (fixed default), ✕ Cancel =
-*interrupt* (fixed default), knob **press** = cycle Knob mode, knob
-**long-press** (≥400 ms, decided on the release edge) = Enter injection
-(`xdotool key Return`, fixed — ticket 6), knob **turn** =
-current Knob mode's `knob_turn` entry.
+*interrupt* (fixed default), knob **press** = toggle the **Wheel** (§5.3),
+knob **long-press** (≥400 ms, decided on the release edge) = Enter injection
+(`xdotool key Return`, fixed — ticket 6), knob **turn** = Ring step ±1.
 
 **Ring** = the Daemon's ordered cycle of root Sessions: ids from
 `GET /api/session?parentID=null&order=desc` (stable `ses_…` keys; cursor-paginate
@@ -279,13 +278,24 @@ to the runtime `:6768`/daemon sockets directly.
 `session.focus` (shipped Preset, assignable): raise the Cursor's Host only, no
 Ring step — same resolution path.
 
-`session.next`/`session.prev`/`sessions.turn` (knob-turn right/left): the cycle
-above. Stale Session id (deleted) → skip to the next valid id **and** surface the
+`session.next`/`session.prev` (and every knob turn): the cycle above. Stale Session id (deleted) → skip to the next valid id **and** surface the
 skip on the failure/status line below (ticket 6 lists "stale Session id (skip to
 next valid)" among the notified events).
 **Cursor drift** from user sidebar clicks / `ctrl+tab` is accepted for v1
-(no title-resync). Mode announce on every Knob-mode switch (press):
-`notify-send` + tray state + `state.json` `knob_mode`; ring pattern per §5.5.
+(no title-resync).
+
+**Wheel** (owner ask 2026-11-16, replacing mode-cycling on press): knob press
+opens the Ring overlay; the Wheel is a pure mirror of `state.json`:
+`picker{open, items[{id,title,host}], index}` — the Daemon owns all state,
+the Panel (`RingOverlay`: frameless, never focused, mouse-transparent, eased
+like the approved HTML prototype) only draws. The Cursor applies live on every
+turn, Wheel shown or not, so **close == confirm** (no modal selection can
+diverge). ✕ (key3) while open closes without further action, as does
+PICKER_TIMEOUT (10 s knob silence, armed on open, refreshed on every turn);
+items cap at PICKER_MAX=12 root Sessions. `ring{index,total,title,host}`
+feeds the Panel header on every Cursor move. Preview: press still toggles the
+Wheel (display only), but turns are reported and not run — the index holds,
+since preview-raise is an execution like any other.
 
 `session.interrupt` — hybrid target: the **focused window's** Session when
 resolvable (window title from `xdotool getactivewindow getwindowname`, matched as
@@ -355,7 +365,7 @@ sits in the upstream code at `bin/vibekeyd:139`):
 - Architecture: **single-writer module** inside the Daemon (confirmed
   architecture, tickets 10/11) over shared global device state — a write queue on
   the main loop, one outstanding acked SET at a time; Presets emit events
-  (§5.4); Knob-mode→ring pattern (§5.3) and battery policy (§5.4) are policies
+  (§5.4); the ring-pattern policy (§5.3, one pattern) and battery policy (§5.4) are policies
   on top. Startup: GET the device lighting config, keep the four records in
   memory, expose `lighting` in `state.json` (channels, acked state, errors) for
   the Panel.
@@ -376,7 +386,7 @@ The Daemon is a **guest with one consented Manage lights**:
   is known ≠ 2 **and** at least one lighting switch is on:
   `vibekey: AU05 device lighting is "Always Off" — knob ring and keycap blinks are idle. Open the Panel → Lighting to let vibekeyd manage lights.`
 - **Manage lights** click → SET mask `0x01` = `2` (ack-confirmed as above),
-  then immediately apply the current Knob mode's pattern. No ack (keypad
+  then immediately apply the ring pattern (§5.3). No ack (keypad
   asleep) → status line `No answer from the device — press any key on the
   AU05, then try again.`; the button stays, no auto-retry — a key press *is*
   the wake mechanism (same physics as fire-time-only blinks).
@@ -479,18 +489,17 @@ chords referencing symbols by name may misfire on non-US layouts.
 
 ## 7. Preset catalogue (`/usr/lib/vibekey/actions.json`)
 
-Schema `version: 1` + `defaults` + `presets` + `knob_turn` (kept). New contents:
+Schema `version: 1` + `defaults` + `presets` (`knob_turn` retired 2026-11-16 with the knob modes). New contents:
 
 ```json
 "defaults": {
-  "key1": "dictation_ptt", "key2": "session_next", "key3": "session_interrupt",
-  "knob_modes": ["scroll", "sessions", "volume"]
+  "key1": "dictation_ptt", "key2": "session_next", "key3": "session_interrupt"
 }
 ```
 
 (First-run seeding writes `buttons` from the per-slot preset entries — copying
-`behavior` like the other fields — and `knob_modes` verbatim; upstream's
-`"knob": "key_enter"` default is superseded by the fixed knob behaviour, §4.)
+`behavior` like the other fields; upstream's `"knob": "key_enter"` default is
+superseded by the fixed knob behaviour, §4.)
 Command **content** below (group labels, step sizes like ±5 %, exact flags) follows
 the replacement families named by the port audit's R2 and is catalogue content,
 editable by the user — the *decided* parts are the presets' existence, behaviour,
@@ -526,17 +535,14 @@ tab-cycle Preset ships** — ticket 6 declined the in-TUI route (stays a user
 habit). The herdr group is gone (map Out of scope). Custom Assignments (free
 `command` / `keys` / release pair) remain supported by the schema and the picker.
 
-### 7.2 `knob_turn`
+### 7.2 `knob_turn` — retired 2026-11-16
 
-| id | label | right | left |
-|---|---|---|---|
-| `scroll` | Scroll | `scroll: "down"` (native wheel pass-through) | `scroll: "up"` |
-| `sessions` | Sessions | `behavior: "sessions.turn"`, `dir: +1` | `behavior: "sessions.turn"`, `dir: -1` |
-| `volume` | Volume | `command: "pactl set-sink-volume @DEFAULT_SINK@ +5%"` | `… -5%` |
-
-Custom knob modes are config-editable (`knob_modes` + catalogue entries are the
-same objects; users add turn entries to a user-mergeable section only if they
-edit actions.json — Panel shows current mode, no reorder UI in v1, ticket 5).
+The section existed to give knob modes their turn Presets
+(`scroll` pass-through / `sessions.turn` ± / `volume` ±5 %). With the knob
+dedicated to the Ring (§5.3) the section is gone from `actions.json`; the
+volume Media Presets remain in §7.1 for button assignment, and page-scroll
+was a pass-through, never a Preset. Historical ticket 5/6 text mentioning
+knob modes stays as decision archaeology.
 
 ## 8. Panel (PySide6) — Variant A "drawn device" (ticket 5)
 

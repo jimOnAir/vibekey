@@ -3,8 +3,7 @@
   "defaults": {
     "key1": "dictation_ptt",
     "key2": "session_next",
-    "key3": "session_interrupt",
-    "knob_modes": ["scroll", "sessions", "volume"]
+    "key3": "session_interrupt"
   },
   "presets": [
     {
@@ -196,29 +195,6 @@
       "label": "Brightness -5 %",
       "description": "brightnessctl set 5%-",
       "command": "brightnessctl set 5%-"
-    }
-  ],
-  "knob_turn": [
-    {
-      "id": "scroll",
-      "label": "Scroll",
-      "description": "Right scrolls down, left scrolls up, like a mouse wheel",
-      "right": {"scroll": "down"},
-      "left": {"scroll": "up"}
-    },
-    {
-      "id": "sessions",
-      "label": "Sessions",
-      "description": "Step the Session Ring and raise each Host",
-      "right": {"behavior": "sessions.turn", "dir": "+1"},
-      "left": {"behavior": "sessions.turn", "dir": "-1"}
-    },
-    {
-      "id": "volume",
-      "label": "Volume",
-      "description": "Right louder, left quieter",
-      "right": {"command": "pactl set-sink-volume @DEFAULT_SINK@ +5%"},
-      "left": {"command": "pactl set-sink-volume @DEFAULT_SINK@ -5%"}
     }
   ]
 }

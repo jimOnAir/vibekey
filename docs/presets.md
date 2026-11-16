@@ -14,13 +14,15 @@ defaults shown come from the shipped catalogue and survive upgrades untouched.
 | 🎙 Voice key | Dictation (hold, handy) | see [Dictation](#dictation) |
 | ✓ Confirm | Next Session | advance the **Ring** of root Sessions, raise the new one's **Host** |
 | ✕ Cancel | Interrupt | stop the agent — see [Interrupt](#interrupt) |
-| Knob press | cycle Knob mode | `Scroll → Sessions → Volume → …`, resets to the first entry at boot |
+| Knob press | toggle the **Wheel** | on-screen Ring of Sessions; press again = confirm selection |
 | Knob long-press (≥400 ms) | Enter | one `Return` keystroke — sized to accept permission prompts |
-| Knob turn | the current Knob mode | Scroll: native wheel · Sessions: Ring ± · Volume: `pactl` ±5 % |
+| Knob turn | step the **Ring** | select ±1 Session; its Host raises live, under the Wheel |
 
-Knob **modes** are an ordered list in your config (`knob_modes`) — put the
-turn-Presets you actually use in it; each switch announces itself by
-notification, tray glyph, and (if enabled) a ring pattern.
+The knob is dedicated to the **Ring of Sessions** (modes retired
+2026-11-16): there is nothing to switch — press opens the **Wheel** and
+confirms from it. Need page-scroll or volume on the knob? Assign
+key-combo/Media Presets to any of the three buttons instead — they are
+fully reassignable, and the Media Presets (`XF86*`) survive the retirement.
 
 ## Dictation
 
@@ -49,6 +51,24 @@ Recommended handy settings, all graded by the handy card: push to talk,
 always-on microphone, overlay off, typing tool `xdotool`, a fast model tier on
 CPU **or** your GPU (Vulkan) — GPU pinning is per-box; on the dev machine the
 RTX-class GPU beat CPU by ~30 % on short dictations.
+
+## The Ring & the Wheel
+
+The knob is the **Session Ring** dial: turning it walks the **Cursor** through
+the Ring of root OpenCode Sessions and raises each Session's **Host** as it
+goes — an Orca tab switch plus window raise, or a plain-terminal raise. Press
+the knob and the **Wheel** opens over the screen (drawn by the Panel): every
+Session with its Host badge, the Cursor's on top, glowing; keep turning to
+pick, press again to confirm. ✕ or ten idle seconds close it — the Cursor
+stays wherever the last turn left it, since the Ring always applies live;
+the Wheel is the visual, never a second source of truth.
+
+Long-press (≥400 ms) remains one `Return` keystroke — sized for accepting an
+agent's permission prompt without touching the keyboard. While a Session
+blocks on approval the knob ring itself runs the `alarm` rhythm, so the need
+finds you even with the Wheel closed.
+
+Up to 12 root Sessions ride the Wheel; the Ring underneath has no cap.
 
 ## Agent Presets
 
@@ -114,7 +134,6 @@ From the terminal, the same edits go through the atomic CLI:
 ```bash
 vibekey-config set-button key2 '{"preset":"key_enter","label":"Press Enter","keys":"Return"}'
 vibekey-config set-button key2 null        # clear it
-vibekey-config set knob_modes '["scroll","sessions","volume"]'
 ```
 
 > **Layout caveat (open fog item):** combos pass X keysyms through unchanged —

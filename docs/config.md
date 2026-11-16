@@ -23,8 +23,6 @@ respected (only a *missing* file is seeded).
   "battery": true,                   // false stops the 15 s vendor keepalive
                                      // (battery reports + AU05 link awareness)
 
-  "knob_modes": ["scroll", "sessions", "volume"],   // ordered; knob press cycles
-                                                     // through these catalogue ids
 
   "aliases": {                       // learned factory reports → Controls,
     "kbd:0x2a": "knob"               // for units reprogrammed in Ulanzi Studio
@@ -47,9 +45,9 @@ respected (only a *missing* file is seeded).
     "mode_ring": true, "fail_blink": true, "low_battery": true,
     "attention_ring": true,          // §5.7: alarm rhythm on pending approval
     "brightness": 1.0,               // 0.0–1.0 multiplier on all written levels
-    "patterns": {                    // by Knob-mode LABEL; missing label → "off"
-      "Scroll": "off", "Sessions": "heartbeat:8", "Volume": "breathe:8"
-    }
+    "pattern": "heartbeat:8"         // the one ring pattern (knob modes retired
+                                     // 2026-11-16; a legacy "patterns" map
+                                     // still loads and its "Sessions" wins)
   }
 
   // "orca_cli": "/path/to/orca-ide"  // optional override; otherwise the shim
@@ -63,7 +61,7 @@ A slot's entry carries a `label` plus **one execution shape**:
 
 | Field | Meaning |
 |---|---|
-| `behavior` | Daemon-implemented Preset: `dictation.ptt`, `session.next/prev/focus/interrupt`, `orca.worktree.next/prev`, `sessions.turn` (+ `dir: "+1"/"-1"`) |
+| `behavior` | Daemon-implemented Preset: `dictation.ptt`, `session.next/prev/focus/interrupt`, `orca.worktree.next/prev` |
 | `keys` | X combo executed as `xdotool key …` (aliases `ctrl/shift/alt/super/altgr`, keysyms pass through) |
 | `command` | shell one-liner run via `bash -c` |
 | `scroll` | native wheel pass-through (used by `scroll` knob turn only) |
@@ -73,10 +71,8 @@ Dispatch precedence: `behavior` → `keys` → `command`. The Panel writes these
 fields through the atomic `vibekey-config` CLI; editing the file by hand works
 too (the Daemon re-reads every 0.5 s).
 
-Knob right/left do **not** appear here — they resolve through the current
-Knob mode's `knob_turn` entry in [actions.json](../actions.json), so switching
-modes re-points both directions at once. The knob itself is fixed in v1:
-press = cycle modes, long-press = `Enter`.
+The knob is not configurable and has no slot: **turn = Ring step, press =
+Wheel, long-press = `Enter`** — the dial has one job (spec §5.3).
 
 ## The file protocol
 
@@ -87,7 +83,7 @@ without disturbing the other:
 |---|---|---|---|
 | `config.json` | `vibekey-config` only (atomic replace) | Daemon (mtime poll + `SIGHUP`), Panel | the truth |
 | `seen.json` | Daemon | Panel | every raw report the unit ever sent — feeds the Alias UX |
-| `state.json` | Daemon (in-place rewrite per event) | Panel (watcher + poll) | `connected`, `access`, `grabbed`, `battery`, `keypad{online, at}` (wireless link — asleep/off keypad still has its USB nodes), `knob_mode`, `knob_position`, `last` (narrated event), `lighting{device_mode, channels, last_error}`, `error`/`last_error` |
+| `state.json` | Daemon (in-place rewrite per event) | Panel (watcher + poll) | `connected`, `access`, `grabbed`, `battery`, `keypad{online, at}` (wireless link — asleep/off keypad still has its USB nodes), `ring{index,total,title,host}` (header), `picker{open,items,index}` (the Wheel), `last` (narrated event), `lighting{device_mode, channels, last_error}`, `error`/`last_error` |
 | `preview` | Panel (`open` every 2 s while shown, `closed` on hide) | Daemon | freshness ≤ 6 s; while live, nothing runs |
 | `manage_lights` | Panel (one-shot `"manage"`) | Daemon (consumes) | the consented [Device lighting mode](lighting.md#device-lighting-mode) request |
 | `power` | Panel (one-shot JSON `standby_s`/`sleep_s`/`enc`) | Daemon (consumes) | the consented device power/noise-reduction writes; the Daemon re-reads and the Panel shows the truth |

@@ -16,8 +16,8 @@ import sys
 import time
 
 from PySide6.QtCore import Qt, QFileSystemWatcher, QTimer, QPointF, QRectF, QSize
-from PySide6.QtGui import (QAction, QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap,
-                           QRadialGradient)
+from PySide6.QtGui import (QAction, QColor, QFont, QFontMetrics, QGuiApplication, QIcon,
+                           QPainter, QPainterPath, QPen, QPixmap, QRadialGradient)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QPlainTextEdit, QPushButton, QSlider,
@@ -61,7 +61,7 @@ ENTRY_FIELDS = ("behavior", "dir", "command", "keys", "release_command", "releas
 
 # zone key -> (slot, caption) mirroring the physical device (spec §8)
 ZONES = [
-    ("knob", None, "Knob — press: cycle Knob mode · hold ≥400 ms: Enter (fixed)"),
+    ("knob", None, "Knob — press: Session Ring (press again = confirm) · hold ≥400 ms: Enter"),
     ("voice", "key1", "Voice key"),
     ("confirm", "key2", "✓ Confirm"),
     ("cancel", "key3", "✕ Cancel"),
@@ -70,7 +70,6 @@ CAPTIONS = {zone: caption for zone, _slot, caption in ZONES}
 SLOT_OF = {zone: slot for zone, slot, _caption in ZONES}
 EDITABLE_SLOTS = [("key1", "Voice key"), ("key2", "✓ Confirm"), ("key3", "✕ Cancel")]
 
-MODE_LABELS = {"scroll": "Scroll", "sessions": "Sessions", "volume": "Volume"}
 
 
 def read_json(path, fallback):
@@ -295,64 +294,6 @@ def draw_app_icon(pm):
     p.end()
 
 
-def _disc_badge(p, size, glyph):
-    """Dark corner disc (bottom-left) carrying the Knob-mode glyph; the
-    warning dot lives opposite (top-right) so the two never collide."""
-    d = size * 0.52
-    x, y = size * 0.02, size * 0.46
-    p.setPen(QPen(QColor("#ffffff"), max(1.0, size * 0.045)))
-    p.setBrush(QColor("#2c2e33"))
-    p.drawEllipse(QRectF(x, y, d, d))
-    glyph(p, QRectF(x, y, d, d))
-
-
-def _glyph_scroll(p, r):
-    cx, half = r.center().x(), r.width() * 0.16
-    p.setPen(_pen("#ffffff", max(1.0, r.width() * 0.11)))
-    y = r.top() + r.height() * 0.32
-    p.drawLine(QPointF(cx - half, y + half * 0.8), QPointF(cx, y))
-    p.drawLine(QPointF(cx, y), QPointF(cx + half, y + half * 0.8))
-    y2 = r.bottom() - r.height() * 0.32
-    p.drawLine(QPointF(cx - half, y2 - half * 0.8), QPointF(cx, y2))
-    p.drawLine(QPointF(cx, y2), QPointF(cx + half, y2 - half * 0.8))
-
-
-def _glyph_sessions(p, r):
-    p.setPen(_pen("#ffffff", max(1.0, r.width() * 0.09)))
-    p.setBrush(Qt.NoBrush)
-    rect = QRectF(r.left() + r.width() * 0.18, r.top() + r.height() * 0.22,
-                  r.width() * 0.64, r.height() * 0.56)
-    p.drawRoundedRect(rect, 1.5, 1.5)
-    y = rect.top() + rect.height() * 0.30
-    p.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
-
-
-def _glyph_volume(p, r):
-    cx, cy = r.center().x(), r.center().y()
-    k = r.width()
-    p.setPen(Qt.NoPen)
-    p.setBrush(QColor("#ffffff"))
-    path = QPainterPath(QPointF(cx - k * 0.16, cy - k * 0.07))
-    path.lineTo(cx - k * 0.04, cy - k * 0.07); path.lineTo(cx + k * 0.09, cy - k * 0.19)
-    path.lineTo(cx + k * 0.09, cy + k * 0.19); path.lineTo(cx - k * 0.04, cy + k * 0.07)
-    path.lineTo(cx - k * 0.16, cy + k * 0.07); path.closeSubpath()
-    p.drawPath(path)
-    p.setBrush(Qt.NoBrush)
-    p.setPen(_pen("#ffffff", max(1.0, k * 0.07)))
-    p.drawArc(QRectF(cx + k * 0.02, cy - k * 0.16, k * 0.26, k * 0.32), -60 * 16, 120 * 16)
-
-
-def _glyph_letter(letter):
-    def fn(p, r):
-        p.setPen(QColor("#ffffff"))
-        p.setFont(QFont("sans", int(r.width() * 0.52), QFont.Bold))
-        p.drawText(r, Qt.AlignCenter, letter.upper())
-    return fn
-
-
-MODE_GLYPHS = {"scroll": _glyph_scroll, "sessions": _glyph_sessions, "volume": _glyph_volume}
-
-
 def _glyph_mic_off(p, r):
     """mini mic struck through — microphone not connected (tray warning badge)."""
     p.save()
@@ -364,19 +305,13 @@ def _glyph_mic_off(p, r):
     p.restore()
 
 
-def app_icon_pixmap(size=32, warn=False, mode_id=None, mode_label=None, mic_off=False):
+def app_icon_pixmap(size=32, warn=False, mic_off=False):
+    """Tray/taskbar icon: the glossy disc plus warning badges only — knob-mode
+    glyphs retired 2026-11-16 with the modes themselves."""
     pm = QPixmap(size, size)
     pm.fill(Qt.transparent)
     draw_app_icon(pm)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.Antialiasing)
-    glyph = MODE_GLYPHS.get(mode_id)
-    if glyph is None and mode_label:
-        glyph = _glyph_letter(mode_label.strip()[:1] or "?")
-    if glyph is not None:
-        _disc_badge(p, size, glyph)
-    p.end()
-    if mic_off:  # top-left; the mode disc and the "!" own the bottom corners
+    if mic_off:  # top-left; the "!" owns the bottom-right
         p = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing)
         d = size * 0.42
@@ -450,7 +385,7 @@ class KeypadWidget(QFrame):
             b.setIcon(line_icon(draw_turn(dx > 0), 22))
             b.setIconSize(QSize(22, 22))
             b.setGeometry(170 + dx * 54 - 13, 75 - 50, 26, 26)
-            b.setToolTip("knob turn " + ("◀" if dx < 0 else "▶") + " (current Knob mode)")
+            b.setToolTip("knob turn " + ("◀" if dx < 0 else "▶") + " (Session Ring step)")
 
     def paintEvent(self, e):
         import math
@@ -621,7 +556,7 @@ class PanelWindow(QMainWindow):
             right.addLayout(row)
             self.rows[slot] = lab
         knob_row = QHBoxLayout()
-        knob_lab = QLabel("<b>Knob</b><br><span style='color:#777'>press: cycle Knob mode · "
+        knob_lab = QLabel("<b>Knob</b><br><span style='color:#777'>press: Session Ring · "
                           "long-press: Enter (fixed)</span>")
         knob_row.addWidget(knob_lab, 1)
         right.addLayout(knob_row)
@@ -643,6 +578,12 @@ class PanelWindow(QMainWindow):
         self.setStatusBar(QStatusBar())
         self.status_line = QLabel("waiting for the Daemon…")
         self.statusBar().addWidget(self.status_line, 1)
+
+        # Session Ring overlay + its easing pump (runs only while the wheel shows)
+        self.ring_overlay = RingOverlay()
+        self.ring_timer = QTimer(self)
+        self.ring_timer.timeout.connect(lambda: self.ring_overlay.step_anim())
+        self.ring_timer.start(30)
 
         # state.json: watcher + 1 s poll (spec §3 — the Daemon rewrites in place,
         # same inode, so the watch survives; the poll covers a replaced file)
@@ -707,11 +648,12 @@ class PanelWindow(QMainWindow):
 
     def refresh(self):
         st = self.state
-        mode = (st.get("knob_mode") or {}).get("label") or "—"
+        ring = st.get("ring") or {}
+        sess = ("Session %s/%s — <b>%s</b>" % (ring.get("index", 0) + 1, ring.get("total", 0), ring.get("title"))
+                if ring.get("title") else "Sessions: —")
         battery = st.get("battery")
         batt = "🔋 %d%%%s" % (battery["percent"], "⚡" if battery.get("charging") else "") if battery else ""
-        self.topinfo.setText("<b>Knob mode: %s</b> · turn position: %s · %s"
-                             % (mode, st.get("knob_position", 0), batt))
+        self.topinfo.setText("<b>%s</b> · %s · %s" % (sess, st.get("picker") and "ring open" or "turn = step", batt))
 
         access = st.get("access")
         problem = st.get("error") or ""
@@ -751,6 +693,7 @@ class PanelWindow(QMainWindow):
         self.refresh_handy_card()
         self.refresh_lighting()
         self.refresh_power()
+        self.ring_overlay.sync(st.get("picker"))
         if st.get("attention"):
             self.set_status("⚠ Session awaiting approval — hold the knob for Enter")
         if not self.unit_enabled():
@@ -771,9 +714,9 @@ class PanelWindow(QMainWindow):
         caption = CAPTIONS.get(zone) or {
             "knob_left": "Knob turn ◀", "knob_right": "Knob turn ▶"}[zone]
         if zone == "knob":
-            detail = "cycle Knob mode (long-press = Enter)"
+            detail = "session ring picker (long-press = Enter)"
         elif zone in ("knob_left", "knob_right"):
-            detail = "current Knob mode's turn action"
+            detail = "Session Ring step (live preview)"
         else:
             detail = self.assignment_for(SLOT_OF.get(zone))
         self.set_status("%s → %s   [RAN (sim)]" % (caption, detail))
@@ -1135,6 +1078,130 @@ class PanelWindow(QMainWindow):
 
 
 # ---------------------------------------------------------------------------
+# The Session Ring overlay (spec §5.3) — mirror of state.json: picker
+# ---------------------------------------------------------------------------
+
+class RingOverlay(QWidget):
+    """The knob-wheel drawn from the Daemon's picker block. Non-interactive
+    (the knob is the only input) and deliberately never focused, so the hosts
+    it previews underneath keep working; the wheel Eases between detents like
+    the HTML prototype the owner approved."""
+
+    W, H = 760, 560
+    RX, RY = 250.0, 165.0
+
+    def __init__(self):
+        super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setFixedSize(self.W, self.H)
+        self.items, self.cur, self.target = [], 0.0, 0
+
+    def sync(self, picker):
+        if not picker or not picker.get("items"):
+            self.hide()
+            self.items = []
+            return
+        self.items = picker["items"]
+        new = int(picker.get("index", 0))
+        if self.isVisible():
+            self.target = new
+        else:
+            self.cur = float(new)
+            self.target = new
+            screen = QGuiApplication.primaryScreen().geometry()
+            self.move(screen.center().x() - self.width() // 2,
+                      screen.center().y() - int(self.height() * 0.54))
+            self.show()
+        self.raise_()
+
+    def step_anim(self):
+        if abs(self.cur - self.target) > 0.01:
+            self.cur += (self.target - self.cur) * 0.28
+            self.update()
+            return True
+        if self.cur != self.target:
+            self.cur = float(self.target)
+            self.update()
+        return False
+
+    def paintEvent(self, _ev):
+        import math
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        cx, cy = self.width() / 2.0, self.height() / 2.0
+        n = max(1, len(self.items))
+        def angle(i):
+            return ((i - self.cur) / n) * 2 * math.pi - math.pi / 2
+        def pos(a):
+            return cx + math.cos(a) * self.RX, cy + math.sin(a) * self.RY
+        back = [i for i in range(len(self.items)) if math.sin(angle(i)) <= 0]
+        front = [i for i in range(len(self.items)) if math.sin(angle(i)) > 0]
+        for i in sorted(back, key=lambda i: angle(i)):
+            self._card(p, i, *pos(angle(i)))
+        self._hub(p, cx, cy)
+        for i in sorted(front, key=lambda i: angle(i)):
+            self._card(p, i, *pos(angle(i)))
+        p.setPen(QColor("#8b94a0"))
+        p.setFont(QFont("sans", 10))
+        p.drawText(self.rect().adjusted(0, 0, 0, -8), Qt.AlignHCenter | Qt.AlignBottom,
+                   "turn = select  ·  press = confirm  ·  ✕ or timeout = close")
+
+    def _card(self, p, i, x, y):
+        it = self.items[i]
+        cur = (round(self.cur) % len(self.items)) == i
+        a = ((i - self.cur) / max(1, len(self.items))) * 2 * 3.14159
+        op = 0.45 + 0.55 * (1 - __import__("math").sin(a)) / 2.0
+        title = str(it.get("title") or "")
+        host = str(it.get("host") or "")
+        f_t = QFont("sans", 13, QFont.Bold)
+        f_h = QFont("sans", 9)
+        w = max(170, min(250, QFontMetrics(f_t).horizontalAdvance(title) + 36))
+        h = 52
+        if cur:
+            w, h = int(w * 1.12), int(h * 1.12)
+        rect = QRectF(x - w / 2, y - h / 2, w, h)
+        p.setOpacity(op)
+        if cur:  # violet glow behind the current card
+            glow = QRectF(rect).adjusted(-6, -6, 6, 6)
+            p.setPen(QPen(QColor(124, 58, 237, 110), 7))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(glow, 15, 15)
+        p.setPen(QPen(QColor("#a78bfa") if cur else QColor(255, 255, 255, 60), 1.5 if cur else 1))
+        p.setBrush(QColor(124, 58, 237, 210) if cur else QColor(18, 20, 26, 205))
+        p.drawRoundedRect(rect, 12, 12)
+        p.setPen(QColor("#ffffff" if cur else "#eff0f1"))
+        p.setFont(f_t)
+        p.drawText(QRectF(rect.left(), rect.top() + 5, rect.width(), 22),
+                   Qt.AlignCenter,
+                   QFontMetrics(f_t).elidedText(title, Qt.ElideRight, int(rect.width() - 20)))
+        p.setPen(QColor(154, 163, 173, int(255 * op)))
+        p.setFont(f_h)
+        p.drawText(QRectF(rect.left(), rect.top() + 27, rect.width(), 16),
+                   Qt.AlignCenter, host.upper())
+        p.setOpacity(1.0)
+
+    def _hub(self, p, cx, cy):
+        r = 59.0
+        grad = QRadialGradient(cx - r * 0.3, cy - r * 0.4, r * 1.9, cx - r * 0.3, cy - r * 0.4)
+        grad.setColorAt(0.0, QColor("#9d7bf7"))
+        grad.setColorAt(0.55, QColor("#7c3aed"))
+        grad.setColorAt(1.0, QColor("#4c1ea6"))
+        p.setPen(QPen(QColor(124, 58, 237, 120), 14))   # ambient glow
+        p.setBrush(grad)
+        p.drawEllipse(QRectF(cx - r, cy - r, 2 * r, 2 * r))
+        n = len(self.items)
+        p.setPen(QColor("#ffffff"))
+        p.setFont(QFont("sans", 24, QFont.Bold))
+        p.drawText(QRectF(cx - r, cy - 26, 2 * r, 34), Qt.AlignCenter,
+                   "%d/%d" % ((round(self.cur) % n) + 1 if n else 0, n))
+        p.setFont(QFont("sans", 8))
+        p.setPen(QColor(255, 255, 255, 210))
+        p.drawText(QRectF(cx - r, cy + 8, 2 * r, 16), Qt.AlignCenter, "S E S S I O N")
+
+
+# ---------------------------------------------------------------------------
 # Tray application
 # ---------------------------------------------------------------------------
 
@@ -1158,7 +1225,7 @@ class TrayApp:
         tray.setToolTip("vibekey — AU05 control surface")
         tray.activated.connect(lambda reason: self.show_window() if reason == QSystemTrayIcon.Trigger else None)
         self.tray = tray
-        self.update_icon(self.window.state)   # tray starts already showing the current Knob mode
+        self.update_icon(self.window.state)   # tray starts in the live state
         tray.show()
         # audio watcher: the tray is the always-visible surface, so it carries the
         # "no microphone" warning (owner ask 2026-11-15); pactl answers in ms
@@ -1175,11 +1242,10 @@ class TrayApp:
         if self.window.isVisible():
             self.window.refresh_handy_card()   # keep the card's mic line honest
 
-    def build_icon(self, problem, mode_id=None, mode_label=None, mic_off=False):
+    def build_icon(self, problem, mic_off=False):
         icon = QIcon()
         for size in (22, 32):
-            icon.addPixmap(app_icon_pixmap(size, warn=problem, mode_id=mode_id,
-                                           mode_label=mode_label, mic_off=mic_off))
+            icon.addPixmap(app_icon_pixmap(size, warn=problem, mic_off=mic_off))
         return icon
 
     def update_icon(self, state):
@@ -1187,11 +1253,7 @@ class TrayApp:
         if tray is None:
             return
         problem = bool(state.get("error")) or state.get("access") == "denied" or bool(state.get("last_error"))
-        mode = state.get("knob_mode") or {}
-        label = mode.get("label")
         tip = "vibekey — AU05 control surface"
-        if label:
-            tip += " · Knob mode: %s" % label
         mic_off, mic_tip = mic_badge(state, self.mic)
         if mic_off:
             tip += " · " + mic_tip
@@ -1199,7 +1261,7 @@ class TrayApp:
             tip += " · agent awaits approval (hold knob = Enter)"
         if problem:
             tip += " · see the Panel (attention badge)"
-        tray.setIcon(self.build_icon(problem, mode.get("id"), label, mic_off))
+        tray.setIcon(self.build_icon(problem, mic_off))
         tray.setToolTip(tip)
 
     def toggle_window(self):

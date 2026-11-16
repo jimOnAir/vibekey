@@ -17,7 +17,7 @@ spec: spec.md at the repo root. What it does
   * Key combos fire as `xdotool key` (one-shot); Dictation brackets the chord
     with `xdotool keydown/keyup` against handy's Tauri backend (spec §2.2).
   * Behaviors (spec §5): dictation.ptt, session.next/prev/focus/interrupt,
-    orca.worktree.next/prev, sessions.turn — Daemon-side Presets.
+    orca.worktree.next/prev + the Session Ring picker on the knob press.
   * Owns the device's indicator lights through a single-writer lighting module
     (TEA-encrypted vendor frames on interface 3; spec §5.5), including the
     Device lighting mode policy (guest + consented Manage lights).
@@ -74,7 +74,8 @@ PREVIEW_MAX_AGE = 6.0
 RESCAN_INTERVAL = 0.7  # the Dongle reboots on its watchdog until something holds the channels open
 CONFIG_POLL = 0.5
 
-KNOB_MODES_DEFAULT = ["scroll", "sessions", "volume"]
+PICKER_TIMEOUT = 10.0   # s of knob silence before the wheel hides itself
+PICKER_MAX = 12         # wheel shows up to this many root Sessions
 LONG_PRESS_SECONDS = 0.4          # knob: press = Knob-mode cycle, long-press = Enter (spec §5.3)
 DICTATION_CHORD_DEFAULT = "ctrl+alt+space"   # handy's Linux default; the Preset owns its chord
 
@@ -274,22 +275,18 @@ ENTRY_FIELDS = ("behavior", "dir", "command", "keys", "release_command", "releas
 
 
 def default_buttons(catalogue):
-    """Buttons + knob_modes for a first-run config, from the "defaults" block
-    of actions.json: a preset id per editable slot, plus "knob_modes" naming
-    the ordered turn modes (spec §7)."""
+    """Buttons for a first-run config, from the "defaults" block of
+    actions.json: a preset id per editable slot (spec §7)."""
     defaults = catalogue.get("defaults")
     if not isinstance(defaults, dict):
-        return {}, list(KNOB_MODES_DEFAULT)
+        return {}
     presets = {p["id"]: p for p in catalogue.get("presets") or [] if isinstance(p, dict) and p.get("id")}
     buttons = {}
     for slot in ("key1", "key2", "key3"):
         preset_id = defaults.get(slot)
         if slot in SLOT_LABELS and preset_id in presets:
             buttons[slot] = preset_entry(presets[preset_id], str(preset_id), ENTRY_FIELDS)
-    modes = defaults.get("knob_modes")
-    if not (isinstance(modes, list) and modes):
-        modes = list(KNOB_MODES_DEFAULT)
-    return buttons, [m for m in modes if isinstance(m, str)]
+    return buttons
 
 
 def seed_config(path=CONFIG_PATH, actions_path=ACTIONS_PATH):
@@ -299,12 +296,12 @@ def seed_config(path=CONFIG_PATH, actions_path=ACTIONS_PATH):
     if os.path.exists(path):
         return False
     catalogue = read_json(actions_path, {})
-    buttons, knob_modes = default_buttons(catalogue)
+    buttons = default_buttons(catalogue)
     if not buttons:
         return False
     try:
         write_json_atomic(path, {"grab": True, "battery": True, "aliases": {},
-                                 "knob_modes": knob_modes, "buttons": buttons})
+                                 "buttons": buttons})
     except OSError as error:
         log("could not write the default config:", error)
         return False
@@ -339,13 +336,6 @@ class Config:
     # exactly (only the unit/CLI flags toggle the Grab; spec §4 keeps that).
 
     @property
-    def knob_modes(self):
-        modes = self.data.get("knob_modes")
-        if isinstance(modes, list) and [m for m in modes if isinstance(m, str) and m]:
-            return [m for m in modes if isinstance(m, str) and m]
-        return list(KNOB_MODES_DEFAULT)
-
-    @property
     def lighting(self):
         block = self.data.get("lighting")
         merged = {"mode_ring": True, "fail_blink": True, "low_battery": True,
@@ -353,15 +343,17 @@ class Config:
                   "brightness": 1.0,
                   "patterns": {"Scroll": "off", "Sessions": "heartbeat:8", "Volume": "breathe:8"}}
         if isinstance(block, dict):
-            for key in ("mode_ring", "fail_blink", "low_battery"):
+            for key in ("mode_ring", "fail_blink", "low_battery", "attention_ring"):
                 merged[key] = block.get(key) is not False
             try:
                 merged["brightness"] = min(1.0, max(0.0, float(block.get("brightness", 1.0))))
             except (TypeError, ValueError):
                 pass
+            if isinstance(block.get("pattern"), str):
+                merged["pattern"] = block["pattern"]      # single ring pattern (§5.3)
             if isinstance(block.get("patterns"), dict):
                 # a user-authored patterns block replaces the defaults:
-                # a mode with no entry → off (spec §4)
+                # a mode with no entry → off (spec §4, legacy per-label map)
                 merged["patterns"] = {k: str(v) for k, v in block["patterns"].items()}
         return merged
 
@@ -435,7 +427,8 @@ class State:
             "mouse_passthrough": False,
             "preview": False,
             "knob_position": 0,
-            "knob_mode": None,
+            "picker": None,
+            "ring": None,
             "device": None,
             "battery": None,
             "keypad": None,
@@ -1260,11 +1253,15 @@ class Lighting:
             self.rhythm = None
             self.queue = [q for q in self.queue if q[1] != "rhythm"]   # latch owns the ring until reset
             return
-        label = self.daemon.current_mode_label()
+        # knob modes retired 2026-11-16: one ring pattern for the Session dial.
+        # Old configs (patterns keyed by mode label) keep working via "Sessions".
+        lighting = self.daemon.config.lighting
         if self.attention:   # awaiting-approval override (spec §5.7) beats the mode pattern
             parts = ["alarm", "12"]
         else:
-            parts = str(self.daemon.config.lighting["patterns"].get(label, "off")).split(":")
+            pattern = lighting.get("pattern") or (lighting.get("patterns") or {}).get("Sessions") \
+                or "heartbeat:8"
+            parts = str(pattern).split(":")
         effect = parts[0]
         try:
             level = int(parts[1]) if len(parts) > 1 and parts[1] else 0
@@ -1455,9 +1452,11 @@ class Daemon:
         self.events = 0
         self.knob_position = 0
         # knob runtime state (spec §5.3): resets at boot by design
-        self.knob_mode_index = 0
         self.knob_press_at = None
         self.dictation_held = False
+        # Session Ring picker (spec §5.3) — cursor IS the selection, live
+        self.picker_open = False
+        self.picker_deadline = 0.0
         # Session cycle state (spec §5.3)
         self.cursor_sid = None
         # worktree cycle state (spec §5.3)
@@ -1477,49 +1476,55 @@ class Daemon:
             self.catalogue = read_json(ACTIONS_PATH, {})
         return self.catalogue
 
-    def knob_mode_ids(self):
-        modes = {p.get("id") for p in self.load_catalogue().get("knob_turn") or [] if isinstance(p, dict)}
-        ids = [m for m in self.config.knob_modes if m in modes]
-        return ids or ([m for m in KNOB_MODES_DEFAULT if m in modes] or ["scroll"])
+    # ---- Session Ring picker (the knob's only press action, spec §5.3) ------
 
-    def current_mode_id(self):
-        ids = self.knob_mode_ids()
-        self.knob_mode_index %= len(ids)
-        return ids[self.knob_mode_index]
+    def picker_rows(self):
+        rows = self.opencode.root_sessions()
+        return [r for r in (rows or []) if isinstance(r, dict) and r.get("id")]
 
-    def current_mode_entry(self):
-        wanted = self.current_mode_id()
-        for mode in self.load_catalogue().get("knob_turn") or []:
-            if isinstance(mode, dict) and mode.get("id") == wanted:
-                return mode
-        return {"id": wanted, "label": wanted.capitalize()}
+    def publish_picker(self, rows=None):
+        """state.json: picker — the Panel's ring overlay renders exactly this;
+        `ring` (always current) feeds the Panel header when the wheel is shut."""
+        if rows is None:
+            rows = self.picker_rows()
+        items = []
+        for r in rows[:PICKER_MAX]:
+            directory = str((r.get("location") or {}).get("directory") or "")
+            repo = directory.rstrip("/").split("/")[-1] if directory else ""
+            host = "Orca · " + repo if repo and self.orca.running() else (repo or "OpenCode")
+            items.append({"id": r["id"], "title": str(r.get("title") or "(untitled)"), "host": host})
+        index = next((i for i, it in enumerate(items) if it["id"] == self.cursor_sid), 0)
+        ring = {"index": index, "total": len(items),
+                "title": items[index]["title"] if items else None,
+                "host": items[index]["host"] if items else None, "at": time.time()}
+        if self.picker_open:
+            self.state.set(picker={"open": True, "items": items, "index": index,
+                                   "at": time.time()}, ring=ring)
+        else:
+            self.state.set(picker=None, ring=ring)
 
-    def current_mode_label(self):
-        return str(self.current_mode_entry().get("label") or self.current_mode_id().capitalize())
+    def toggle_picker(self):
+        if self.picker_open:
+            self.picker_open = False
+            self.publish_picker()
+            return "picker closed"
+        rows = self.picker_rows()
+        if not rows:
+            self.fail(None, "OpenCode service or Sessions not available")
+            return "picker: none"
+        self.picker_open = True
+        self.picker_deadline = time.monotonic() + PICKER_TIMEOUT
+        self.publish_picker(rows)
+        return "picker open (%d sessions)" % len(rows)
 
-    def cycle_knob_mode(self):
-        ids = self.knob_mode_ids()
-        self.knob_mode_index = (self.knob_mode_index + 1) % len(ids)
-        mode_id = ids[self.knob_mode_index]
-        label = self.current_mode_label()
-        self.state.set(knob_mode={"id": mode_id, "label": label})
-        notify("vibekey", "Knob mode: %s" % label)
-        self.lighting.apply_ring_pattern()
-        return mode_id, label
-
-    def knob_scroll_active(self):
-        mode = self.current_mode_entry()
-        return any(isinstance(mode.get(side), dict) and mode[side].get("scroll")
-                   for side in ("right", "left"))
-
-    def turn_entry(self, side):
-        mode = self.current_mode_entry()
-        source = mode.get(side) if isinstance(mode.get(side), dict) else {}
-        entry = preset_entry(mode, "knob:" + str(mode.get("id")), ())
-        for field in ENTRY_FIELDS:
-            if isinstance(source.get(field), str) and source[field]:
-                entry[field] = source[field]
-        return entry
+    def close_picker(self):
+        """Idle timeout or ✕ while open — the cursor stays where the last turn
+        left it (the ring applies live; the wheel is the visual)."""
+        if not self.picker_open:
+            return None
+        self.picker_open = False
+        self.publish_picker()
+        return "picker closed"
 
     # ---- preview / device lifecycle ---------------------------------------
 
@@ -1649,6 +1654,7 @@ class Daemon:
         row = next(r for r in rows if r.get("id") == target)
         self.cursor_sid = target
         where = self.raise_host(row)
+        self.publish_picker(rows)       # wheel (if open) + header ring line follow live
         return "session %s (%s)" % (target, where or "host not raised")
 
     def focus_host(self):
@@ -1717,7 +1723,6 @@ class Daemon:
             return self.dictation_ptt(entry, phase)
         if phase != "press":
             return None
-        direction = -1 if str(entry.get("dir") or "+1").strip() in ("-1", "-") else 1
         if behavior == "session.next":
             return self.step_sessions(1)
         if behavior == "session.prev":
@@ -1726,8 +1731,6 @@ class Daemon:
             return self.focus_host()
         if behavior == "session.interrupt":
             return self.interrupt(slot)
-        if behavior == "sessions.turn":
-            return self.step_sessions(direction)
         if behavior == "orca.worktree.next":
             return self.step_worktrees(1)
         if behavior == "orca.worktree.prev":
@@ -1806,7 +1809,7 @@ class Daemon:
             # press = Knob-mode cycle, long-press = Enter — decided on the
             # release edge (spec §5.3)
             if preview:
-                action = "knob mode cycle" if phase == "press" else "long-press → Enter"
+                action = "session ring picker" if phase == "press" else "long-press → Enter"
             elif phase == "press":
                 self.knob_press_at = time.monotonic()
             elif self.knob_press_at is not None:
@@ -1816,15 +1819,25 @@ class Daemon:
                     xdo_key("Return")
                     action = "keys Return (long-press)"
                 else:
-                    _mode_id, mode_label = self.cycle_knob_mode()
-                    action = "knob mode: %s" % mode_label
+                    action = self.toggle_picker()
+                    if self.picker_open:
+                        self.lighting.apply_ring_pattern()
         elif slot in ("knob_right", "knob_left"):
             if phase == "press":
-                entry = self.turn_entry("right" if slot == "knob_right" else "left")
-                action = self.describe_action(entry, phase) if preview else self.run_action(entry, phase, slot)
+                direction = 1 if slot == "knob_right" else -1
+                if preview:
+                    action = "session %+d (Preview)" % direction
+                else:
+                    action = self.step_sessions(direction)
+                    if self.picker_open:
+                        self.picker_deadline = time.monotonic() + PICKER_TIMEOUT
         elif slot in SLOT_LABELS:
-            entry = self.config.button(raw_id, slot)
-            action = self.describe_action(entry, phase) if preview else self.run_action(entry, phase, slot)
+            if self.picker_open and slot == "key3":
+                action = self.close_picker()          # ✕ is Cancel while the wheel is open
+                action = action or None
+            else:
+                entry = self.config.button(raw_id, slot)
+                action = self.describe_action(entry, phase) if preview else self.run_action(entry, phase, slot)
         if self.probe:
             print("%s %-14s %-24s slot=%-10s action=%s" % (time.strftime("%H:%M:%S"), raw_id, label, slot or "-", action or "-"), flush=True)
         if phase != "press":
@@ -1944,17 +1957,13 @@ class Daemon:
             log("keypad link:", "asleep or off" if not online else "alive again")
             self.state.set(keypad={"online": online, "at": time.time(), "via": "heuristic"})
 
-    def want_mouse_passthrough(self):
-        return self.knob_scroll_active() and not self.preview_active()
-
     def sync_grab(self):
-        """Grab state follows the config and the Panel: with the knob on scroll
-        its wheel reports pass through, except while the Panel previews."""
+        """Full Grab always: the knob's native wheel never passes through now
+        that its turn belongs to the Session Ring (modes retired 2026-11-16)."""
         grab = self.want_grab()
-        passthrough = grab and self.want_mouse_passthrough()
-        if self.device.grabbed == grab and self.device.mouse_passthrough == passthrough:
+        if self.device.grabbed == grab and not self.device.mouse_passthrough:
             return
-        self.device.set_grab(grab, passthrough)
+        self.device.set_grab(grab)
         self.state.set(grabbed=self.device.grabbed, mouse_passthrough=self.device.mouse_passthrough)
 
     def apply_config_change(self):
@@ -2046,9 +2055,10 @@ class Daemon:
     def run(self):
         log("config:", CONFIG_PATH)
         log("state:", STATE_PATH)
-        self.state.set(knob_mode={"id": self.current_mode_id(), "label": self.current_mode_label()})
         while self.running:
             now = time.monotonic()
+            if self.picker_open and now >= self.picker_deadline:
+                self.close_picker()
             self.ensure_x_env(now)
             reap_children(self.report_failure)
             if now >= self.next_config:
