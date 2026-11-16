@@ -1581,6 +1581,7 @@ class Daemon:
         self.last_contact = time.monotonic()
         self.keypad_online = True
         self.state.set(keypad={"online": True, "at": time.time()})
+        self.publish_picker()   # header shows Session 1/N from the first breath
         if self.allow_lighting:
             self.lighting.on_connected(self.config)
         return True
