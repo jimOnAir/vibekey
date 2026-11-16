@@ -1146,19 +1146,20 @@ class RingOverlay(QWidget):
         p.setPen(QColor("#8b94a0"))
         p.setFont(QFont("sans", 10))
         p.drawText(self.rect().adjusted(0, 0, 0, -8), Qt.AlignHCenter | Qt.AlignBottom,
-                   "turn = select  ·  press = confirm  ·  ✕ or timeout = close")
+                   "turn = select  ·  press = switch  ·  Close slot / ✕ / 15 s idle = dismiss")
 
     def _card(self, p, i, x, y):
         it = self.items[i]
+        is_close = str(it.get("id")) == "__close__"
         cur = (round(self.cur) % len(self.items)) == i
         a = ((i - self.cur) / max(1, len(self.items))) * 2 * 3.14159
         op = 0.45 + 0.55 * (1 - __import__("math").sin(a)) / 2.0
         title = str(it.get("title") or "")
         host = str(it.get("host") or "")
-        f_t = QFont("sans", 13, QFont.Bold)
+        f_t = QFont("sans", 13 if not is_close else 12, QFont.Bold)
         f_h = QFont("sans", 9)
-        w = max(170, min(250, QFontMetrics(f_t).horizontalAdvance(title) + 36))
-        h = 52
+        w = 110 if is_close else max(170, min(250, QFontMetrics(f_t).horizontalAdvance(title) + 36))
+        h = 52 if not is_close else 40
         if cur:
             w, h = int(w * 1.12), int(h * 1.12)
         rect = QRectF(x - w / 2, y - h / 2, w, h)
@@ -1169,17 +1170,19 @@ class RingOverlay(QWidget):
             p.setBrush(Qt.NoBrush)
             p.drawRoundedRect(glow, 15, 15)
         p.setPen(QPen(QColor("#a78bfa") if cur else QColor(255, 255, 255, 60), 1.5 if cur else 1))
-        p.setBrush(QColor(124, 58, 237, 210) if cur else QColor(18, 20, 26, 205))
+        close_dim = QColor(70, 74, 82, 210) if is_close else QColor(18, 20, 26, 205)
+        p.setBrush(QColor(124, 58, 237, 210) if (cur and not is_close) else
+                   (QColor(124, 58, 237, 150) if cur else close_dim))
         p.drawRoundedRect(rect, 12, 12)
-        p.setPen(QColor("#ffffff" if cur else "#eff0f1"))
+        p.setPen(QColor("#ffffff" if cur else ("#9aa3ad" if is_close else "#eff0f1")))
         p.setFont(f_t)
-        p.drawText(QRectF(rect.left(), rect.top() + 5, rect.width(), 22),
-                   Qt.AlignCenter,
+        p.drawText(rect, Qt.AlignCenter, title if is_close else
                    QFontMetrics(f_t).elidedText(title, Qt.ElideRight, int(rect.width() - 20)))
-        p.setPen(QColor(154, 163, 173, int(255 * op)))
-        p.setFont(f_h)
-        p.drawText(QRectF(rect.left(), rect.top() + 27, rect.width(), 16),
-                   Qt.AlignCenter, host.upper())
+        if not is_close:
+            p.setPen(QColor(154, 163, 173, int(255 * op)))
+            p.setFont(f_h)
+            p.drawText(QRectF(rect.left(), rect.top() + 27, rect.width(), 16),
+                       Qt.AlignCenter, host.upper())
         p.setOpacity(1.0)
 
     def _hub(self, p, cx, cy):
@@ -1192,10 +1195,13 @@ class RingOverlay(QWidget):
         p.setBrush(grad)
         p.drawEllipse(QRectF(cx - r, cy - r, 2 * r, 2 * r))
         n = len(self.items)
+        sessions = sum(1 for it in self.items if str(it.get("id")) != "__close__")
+        sel = round(self.cur) % n if n else 0
+        on_close = n > 0 and str(self.items[sel].get("id")) == "__close__"
         p.setPen(QColor("#ffffff"))
         p.setFont(QFont("sans", 24, QFont.Bold))
         p.drawText(QRectF(cx - r, cy - 26, 2 * r, 34), Qt.AlignCenter,
-                   "%d/%d" % ((round(self.cur) % n) + 1 if n else 0, n))
+                   "✕" if on_close else "%d/%d" % (sel + 1, sessions))
         p.setFont(QFont("sans", 8))
         p.setPen(QColor(255, 255, 255, 210))
         p.drawText(QRectF(cx - r, cy + 8, 2 * r, 16), Qt.AlignCenter, "S E S S I O N")

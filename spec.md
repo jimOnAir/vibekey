@@ -284,18 +284,29 @@ next valid)" among the notified events).
 **Cursor drift** from user sidebar clicks / `ctrl+tab` is accepted for v1
 (no title-resync).
 
-**Wheel** (owner ask 2026-11-16, replacing mode-cycling on press): knob press
-opens the Ring overlay; the Wheel is a pure mirror of `state.json`:
-`picker{open, items[{id,title,host}], index}` — the Daemon owns all state,
-the Panel (`RingOverlay`: frameless, never focused, mouse-transparent, eased
-like the approved HTML prototype) only draws. The Cursor applies live on every
-turn, Wheel shown or not, so **close == confirm** (no modal selection can
-diverge). ✕ (key3) while open closes without further action, as does
-PICKER_TIMEOUT (10 s knob silence, armed on open, refreshed on every turn);
-items cap at PICKER_MAX=12 root Sessions. `ring{index,total,title,host}`
-feeds the Panel header on every Cursor move. Preview: press still toggles the
-Wheel (display only), but turns are reported and not run — the index holds,
-since preview-raise is an execution like any other.
+**Wheel** (owner batch 2026-11-16, replacing mode-cycling on press): knob
+press opens the Ring overlay — a pure mirror of `state.json`:
+`picker{open, items[{id,title,host}], index}`; the last item is always the
+dedicated **Close** slot (`id: "__close__"`). The Daemon owns all state; the
+Panel (`RingOverlay`: frameless, never focused, mouse-transparent, eased like
+the approved HTML prototype) only draws.
+
+Semantics (owner: "sessions switch ON PRESS", "separate close item", "15 s"):
+- **turn while open** = selection only (`picker_turn`): pure index math over
+  the rows cached at open — zero HTTP, zero raises, the Cursor untouched;
+- **press while open** = commit: the selection becomes the Cursor and its
+  Host is raised immediately (the one switch point); press on the Close slot
+  behaves like ✕;
+- **✕ (key3) while open** or PICKER_TIMEOUT (**15 s** knob silence, armed on
+  open, refreshed on every turn) = dismiss; nothing changes — a browsing spin
+  is inert by construction;
+- **turn while closed** = the direct Ring dial as before (debounced live
+  raise, RAISE_DEBOUNCE 0.35 s) for quick stepping.
+
+Items cap at PICKER_MAX=12 root Sessions. `ring{index,total,title,host}`
+feeds the Panel header (session count excludes the Close slot). Preview:
+opening and browsing stay available (display only); confirm downgrades to
+close-without-switching (`picker closed (Preview)`).
 
 `session.interrupt` — hybrid target: the **focused window's** Session when
 resolvable (window title from `xdotool getactivewindow getwindowname`, matched as

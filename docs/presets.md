@@ -54,14 +54,16 @@ RTX-class GPU beat CPU by ~30 % on short dictations.
 
 ## The Ring & the Wheel
 
-The knob is the **Session Ring** dial: turning it walks the **Cursor** through
-the Ring of root OpenCode Sessions and raises each Session's **Host** as it
-goes — an Orca tab switch plus window raise, or a plain-terminal raise. Press
-the knob and the **Wheel** opens over the screen (drawn by the Panel): every
-Session with its Host badge, the Cursor's on top, glowing; keep turning to
-pick, press again to confirm. ✕ or ten idle seconds close it — the Cursor
-stays wherever the last turn left it, since the Ring always applies live;
-the Wheel is the visual, never a second source of truth.
+The knob is the **Session Ring** dial. Press it and the **Wheel** opens over
+the screen (drawn by the Panel): every Session with its Host badge, the
+**Close** slot, your current one glowing on top. Turning while the Wheel is
+open *only selects* — nothing switches, no windows move. **Press switches**:
+the selection becomes the Cursor and its Host is raised (Orca tab plus window
+raise, or plain-terminal raise). Press on the Close slot, ✕, or fifteen idle
+seconds dismiss without changing anything. With the Wheel closed, plain knob
+turns still dial the Ring directly (debounced live raise) for quick stepping.
+Selection and Cursor are deliberately separate while browsing: the Wheel is a
+chooser, and only the press commits.
 
 Long-press (≥400 ms) remains one `Return` keystroke — sized for accepting an
 agent's permission prompt without touching the keyboard. While a Session

@@ -65,7 +65,7 @@ Open **vibekey Panel** (applications menu, or `vibekey-panel`).
 - The **header** shows where the **Ring** points (`Session 2/6 — title`), and battery.
 - **Ring & Wheel**: press the knob and a **Wheel** of your Sessions opens over
   the screen — turn to select (each Session's Host raises live underneath),
-  press again to confirm, ✕ or 10 s idle to close. Long-press remains
+  press again to confirm, the **Close** slot, ✕ or 15 s idle to dismiss. Long-press remains
   `Enter` — the gesture that accepts an agent's permission prompt
   ([docs/presets.md](presets.md#the-ring--the-wheel)).
 - The **status line** narrates everything the Daemon sees — while the Panel
