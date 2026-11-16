@@ -76,6 +76,8 @@ CONFIG_POLL = 0.5
 
 PICKER_TIMEOUT = 10.0   # s of knob silence before the wheel hides itself
 PICKER_MAX = 12         # wheel shows up to this many root Sessions
+RAISE_DEBOUNCE = 0.35   # s of turn silence before previewing a Host (coalesces
+                        # a spin into ONE CLI raise — the Wheel itself is instant)
 LONG_PRESS_SECONDS = 0.4          # knob: press = Knob-mode cycle, long-press = Enter (spec §5.3)
 DICTATION_CHORD_DEFAULT = "ctrl+alt+space"   # handy's Linux default; the Preset owns its chord
 
@@ -1457,6 +1459,8 @@ class Daemon:
         # Session Ring picker (spec §5.3) — cursor IS the selection, live
         self.picker_open = False
         self.picker_deadline = 0.0
+        self.pending_raise = None       # debounced Wheel-preview host raise
+        self._orca_check = (0.0, False)  # (mono_ts, bool) orca.running() cache
         # Session cycle state (spec §5.3)
         self.cursor_sid = None
         # worktree cycle state (spec §5.3)
@@ -1482,16 +1486,25 @@ class Daemon:
         rows = self.opencode.root_sessions()
         return [r for r in (rows or []) if isinstance(r, dict) and r.get("id")]
 
+    def orca_running_cached(self):
+        """orca.running() spawns the CLI shim — expensive. Cache 5 s; the
+        Wheel must never pay it per item (perf fix 2026-11-16)."""
+        now = time.monotonic()
+        if now - self._orca_check[0] > 5.0:
+            self._orca_check = (now, bool(self.orca.binary and self.orca.running()))
+        return self._orca_check[1]
+
     def publish_picker(self, rows=None):
         """state.json: picker — the Panel's ring overlay renders exactly this;
         `ring` (always current) feeds the Panel header when the wheel is shut."""
         if rows is None:
             rows = self.picker_rows()
+        orca_up = self.orca_running_cached()
         items = []
         for r in rows[:PICKER_MAX]:
             directory = str((r.get("location") or {}).get("directory") or "")
             repo = directory.rstrip("/").split("/")[-1] if directory else ""
-            host = "Orca · " + repo if repo and self.orca.running() else (repo or "OpenCode")
+            host = "Orca · " + repo if repo and orca_up else (repo or "OpenCode")
             items.append({"id": r["id"], "title": str(r.get("title") or "(untitled)"), "host": host})
         index = next((i for i, it in enumerate(items) if it["id"] == self.cursor_sid), 0)
         ring = {"index": index, "total": len(items),
@@ -1637,7 +1650,7 @@ class Daemon:
             return "wmctrl"
         return None
 
-    def step_sessions(self, direction):
+    def step_sessions(self, direction, delay=0.0):
         rows = self.session_rows()
         if not rows:
             return "sessions: none"
@@ -1653,8 +1666,13 @@ class Daemon:
         target = ids[(index + direction) % len(ids)]
         row = next(r for r in rows if r.get("id") == target)
         self.cursor_sid = target
+        self.publish_picker(rows)       # paint the Wheel FIRST — visuals must never wait
+        if delay > 0:
+            # Live preview, coalesced: a burst of detents raises exactly one
+            # Host once the knob settles (each Orca CLI call is expensive).
+            self.pending_raise = (row, time.monotonic() + delay)
+            return "session %s (preview)" % target
         where = self.raise_host(row)
-        self.publish_picker(rows)       # wheel (if open) + header ring line follow live
         return "session %s (%s)" % (target, where or "host not raised")
 
     def focus_host(self):
@@ -1828,7 +1846,7 @@ class Daemon:
                 if preview:
                     action = "session %+d (Preview)" % direction
                 else:
-                    action = self.step_sessions(direction)
+                    action = self.step_sessions(direction, delay=RAISE_DEBOUNCE)
                     if self.picker_open:
                         self.picker_deadline = time.monotonic() + PICKER_TIMEOUT
         elif slot in SLOT_LABELS:
@@ -2059,6 +2077,12 @@ class Daemon:
             now = time.monotonic()
             if self.picker_open and now >= self.picker_deadline:
                 self.close_picker()
+            if self.pending_raise and now >= self.pending_raise[1]:
+                row, _due = self.pending_raise
+                self.pending_raise = None
+                where = self.raise_host(row)
+                if where is None:
+                    log("preview raise: no window for", row.get("title"))
             self.ensure_x_env(now)
             reap_children(self.report_failure)
             if now >= self.next_config:

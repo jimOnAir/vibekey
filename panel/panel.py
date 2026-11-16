@@ -1114,7 +1114,7 @@ class RingOverlay(QWidget):
             self.move(screen.center().x() - self.width() // 2,
                       screen.center().y() - int(self.height() * 0.54))
             self.show()
-        self.raise_()
+            self.raise_()               # once, on show — StaysOnTop keeps it there
 
     def step_anim(self):
         if abs(self.cur - self.target) > 0.01:
