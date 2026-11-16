@@ -450,6 +450,14 @@ The Daemon is a **guest with one consented Manage lights**:
   switch, the `mode_ring` switch, or the low-battery latch purges queued
   `rhythm` frames so cycles never interleave. Device-native `breathe` remains
   available and is still the Volume default (zero host traffic for it).
+  **Sleep breaker** (owner report "why is the keyboard blinking?" 2026-11-16):
+  a sleeping keypad never ACKs lighting SETs, so every rhythm frame burns the
+  1.3 s deadline and the cycle re-queues forever — the ring strobes against
+  the unreachable device. Three consecutive unanswered `rhythm` writes trip
+  `rhythm_misses`: queued steps drop, scheduling pauses (no more than 3
+  probes + the first 3 log lines). Any lighting ACK (the keypad proved it
+  listens) or a keypad→online link transition (wake) resets the counter and
+  the rhythm resumes on the next `pump()`.
 - **All three switches off → total silence**: no lighting GET, no `0x88`
   traffic from vibekeyd at all (the battery opcode on the same fd is
   unaffected), `device_mode: "disabled"`, no notify — cleanest form of "be

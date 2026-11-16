@@ -66,6 +66,17 @@ Work the chain:
 6. Slow but working is normal: ~0.5–2 s (fast model, GPU/CPU) to several
    seconds on accurate tiers.
 
+## The ring lights up and blinks while the keypad was idle
+
+A host-driven **rhythm** pattern (`heartbeat`, `alarm`, …) keeps writing ring
+steps to the keypad — but a keypad in standby never ACKs them. Before the
+sleep breaker this stampeded one timed-out write per 1.3 s forever, which
+looks like the keyboard slowly flickering and fills `journalctl --user -u
+vibekeyd` with `lighting write timed out: rhythm`. Now three unanswered
+frames pause the rhythm; it resumes on the next ACK or the moment you wake
+the keypad with a key. If you are on an older package: `systemctl --user
+restart vibekeyd` stops it until the next sleep — updating fixes it for good.
+
 ## The ring never lights up
 
 Two gates:

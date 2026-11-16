@@ -1196,6 +1196,11 @@ class Lighting:
         self.attention = False              # awaiting-approval ring override (spec §5.7)
         self.rhythm = None                  # (name, level, period_ms) while a host rhythm runs
         self.rhythm_tail = 0.0
+        # A sleeping/off keypad never ACKs lighting SETs — writing the ring
+        # rhythm at it anyway strobes the LEDs and floods the log (owner:
+        # "why keyboard is blinking?"). Three unanswered rhythm frames pause
+        # the sequencer; a lighting ACK or a keypad wake resumes it.
+        self.rhythm_misses = 0
 
     # ---- connection lifecycle -------------------------------------------------
 
@@ -1204,6 +1209,7 @@ class Lighting:
         self.queue = []
         self.outstanding = None
         self.get_pending = False
+        self.rhythm_misses = 0          # fresh link: give the rhythm a clean slate
         if not self.enabled:
             self.device_mode = "disabled"
         else:
@@ -1400,9 +1406,21 @@ class Lighting:
             elif kind == "mode":
                 self.daemon.state.set_lighting(pending_mode=False,
                                                last_error="No answer from the device — press any key on the AU05, then try again.")
-            log("lighting write timed out:", kind)
-        # rhythm: when idle past the cycle end, queue the next one
-        if self.rhythm and not self.outstanding and not self.queue and now >= self.rhythm_tail:
+            if kind == "rhythm":
+                self.rhythm_misses += 1
+                # the cycle this frame belongs to has gone stale — drop its
+                # queued steps instead of stamping them through 1.3 s of
+                # timeout each, and stop narrating after the first three
+                self.queue = [q for q in self.queue if q[1] != "rhythm"]
+                if self.rhythm_misses <= 3:
+                    log("lighting write timed out:", kind)
+            else:
+                log("lighting write timed out:", kind)
+        # rhythm: when idle past the cycle end, queue the next one — unless
+        # the keypad has proven unreachable (pause; wake/ACK resumes)
+        if self.rhythm and self.rhythm_misses >= 3:
+            pass
+        elif self.rhythm and not self.outstanding and not self.queue and now >= self.rhythm_tail:
             self.start_rhythm_cycle()
         if self.outstanding or not self.queue:
             return
@@ -1424,6 +1442,7 @@ class Lighting:
         kind = self.outstanding[1] if self.outstanding else None
         self.outstanding = None
         self.get_pending = False
+        self.rhythm_misses = 0            # an ACK proves the keypad listens — resume rhythm
         if kind == "mode":
             self.device_mode = MODE_WORK
             self.daemon.state.set_lighting(device_mode=MODE_WORK, pending_mode=False,
@@ -2100,6 +2119,7 @@ class Daemon:
         if online:
             self.last_contact = time.monotonic()
             self.next_power = 0.0                              # read power info right away
+            self.lighting.rhythm_misses = 0                    # wake resumes the paused rhythm
 
     def poll_link(self, now):
         """Wireless-link awareness (owner ask, 2026-11-15): authoritative via the
@@ -2114,6 +2134,8 @@ class Daemon:
         if online != self.keypad_online:
             self.keypad_online = online
             log("keypad link:", "asleep or off" if not online else "alive again")
+            if online:
+                self.lighting.rhythm_misses = 0      # wake resumes the paused ring rhythm
             self.state.set(keypad={"online": online, "at": time.time(), "via": "heuristic"})
 
     def sync_grab(self):
