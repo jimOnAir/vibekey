@@ -56,7 +56,8 @@ RTX-class GPU beat CPU by ~30 % on short dictations.
 
 The knob is the **Session Ring** dial. Press it and the **Wheel** opens over
 the screen (drawn by the Panel): every Session with its Host badge, the
-**Close** slot, your current one glowing on top. Turning while the Wheel is
+**Close** slot, as a vertical carousel — the selection glows in the centre,
+neighbours recede above and below. Turning while the Wheel is
 open *only selects* — nothing switches, no windows move. **Press switches**:
 the selection becomes the Cursor and its Host is raised (Orca tab plus window
 raise, or plain-terminal raise). Press on the Close slot, ✕, or fifteen idle

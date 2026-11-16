@@ -1126,23 +1126,30 @@ class RingOverlay(QWidget):
             self.update()
         return False
 
+    # ---- carousel geometry -------------------------------------------------
+    # 13 cards around an ellipse gave ~100 px per slot against cards up to
+    # 250 px wide: labels crawled over each other (owner 2026-11-16 "too
+    # dense"). A vertical carousel (cover flow for a knob — a rotary list)
+    # keeps every label on its own row: one column, selection center,
+    # neighbors receding with eased depth. Same picker state, same easing.
+    STEP = 78.0        # px between slots
+    WINDOW = 3         # slots shown each side of the selection
+
+    def _depth(self, i, n):
+        """Signed slot distance from the selection along the nearest wrap."""
+        d = (i - self.cur) % n
+        return d - n if d > n / 2.0 else d
+
     def paintEvent(self, _ev):
-        import math
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        cx, cy = self.width() / 2.0, self.height() / 2.0
-        n = max(1, len(self.items))
-        def angle(i):
-            return ((i - self.cur) / n) * 2 * math.pi - math.pi / 2
-        def pos(a):
-            return cx + math.cos(a) * self.RX, cy + math.sin(a) * self.RY
-        back = [i for i in range(len(self.items)) if math.sin(angle(i)) <= 0]
-        front = [i for i in range(len(self.items)) if math.sin(angle(i)) > 0]
-        for i in sorted(back, key=lambda i: angle(i)):
-            self._card(p, i, *pos(angle(i)))
-        self._hub(p, cx, cy)
-        for i in sorted(front, key=lambda i: angle(i)):
-            self._card(p, i, *pos(angle(i)))
+        cx = self.width() / 2.0
+        cy = self.height() / 2.0 + 4
+        n = len(self.items)
+        for i in sorted(range(n), key=lambda i: -abs(self._depth(i, n))):
+            if abs(self._depth(i, n)) > self.WINDOW + 0.5:
+                continue
+            self._card(p, i, cx, cy + self._depth(i, n) * self.STEP)
         p.setPen(QColor("#8b94a0"))
         p.setFont(QFont("sans", 10))
         p.drawText(self.rect().adjusted(0, 0, 0, -8), Qt.AlignHCenter | Qt.AlignBottom,
@@ -1151,20 +1158,25 @@ class RingOverlay(QWidget):
     def _card(self, p, i, x, y):
         it = self.items[i]
         is_close = str(it.get("id")) == "__close__"
-        cur = (round(self.cur) % len(self.items)) == i
-        a = ((i - self.cur) / max(1, len(self.items))) * 2 * 3.14159
-        op = 0.45 + 0.55 * (1 - __import__("math").sin(a)) / 2.0
+        n = max(1, len(self.items))
+        d = abs(self._depth(i, n))
+        cur = (round(self.cur) % n) == i
+        scale = max(0.66, 1.0 - d * 0.105)
+        op = max(0.32, 1.0 - d * 0.24)
         title = str(it.get("title") or "")
         host = str(it.get("host") or "")
-        f_t = QFont("sans", 13 if not is_close else 12, QFont.Bold)
-        f_h = QFont("sans", 9)
-        w = 110 if is_close else max(170, min(250, QFontMetrics(f_t).horizontalAdvance(title) + 36))
-        h = 52 if not is_close else 40
+        f_t = QFont("sans")
+        f_t.setPointSizeF(13.0 * scale)
+        f_t.setBold(True)
+        f_h = QFont("sans")
+        f_h.setPointSizeF(9.0 * scale)
+        w = (110 if is_close else max(170, min(250, QFontMetrics(f_t).horizontalAdvance(title) + 36))) * scale
+        h = (52 if not is_close else 40) * scale
         if cur:
             w, h = int(w * 1.12), int(h * 1.12)
         rect = QRectF(x - w / 2, y - h / 2, w, h)
         p.setOpacity(op)
-        if cur:  # violet glow behind the current card
+        if cur:  # violet glow behind the selected card
             glow = QRectF(rect).adjusted(-6, -6, 6, 6)
             p.setPen(QPen(QColor(124, 58, 237, 110), 7))
             p.setBrush(Qt.NoBrush)
@@ -1178,33 +1190,12 @@ class RingOverlay(QWidget):
         p.setFont(f_t)
         p.drawText(rect, Qt.AlignCenter, title if is_close else
                    QFontMetrics(f_t).elidedText(title, Qt.ElideRight, int(rect.width() - 20)))
-        if not is_close:
+        if not is_close and scale > 0.8:
             p.setPen(QColor(154, 163, 173, int(255 * op)))
             p.setFont(f_h)
-            p.drawText(QRectF(rect.left(), rect.top() + 27, rect.width(), 16),
+            p.drawText(QRectF(rect.left(), rect.top() + rect.height() * 0.52, rect.width(), rect.height() * 0.3),
                        Qt.AlignCenter, host.upper())
         p.setOpacity(1.0)
-
-    def _hub(self, p, cx, cy):
-        r = 59.0
-        grad = QRadialGradient(cx - r * 0.3, cy - r * 0.4, r * 1.9, cx - r * 0.3, cy - r * 0.4)
-        grad.setColorAt(0.0, QColor("#9d7bf7"))
-        grad.setColorAt(0.55, QColor("#7c3aed"))
-        grad.setColorAt(1.0, QColor("#4c1ea6"))
-        p.setPen(QPen(QColor(124, 58, 237, 120), 14))   # ambient glow
-        p.setBrush(grad)
-        p.drawEllipse(QRectF(cx - r, cy - r, 2 * r, 2 * r))
-        n = len(self.items)
-        sessions = sum(1 for it in self.items if str(it.get("id")) != "__close__")
-        sel = round(self.cur) % n if n else 0
-        on_close = n > 0 and str(self.items[sel].get("id")) == "__close__"
-        p.setPen(QColor("#ffffff"))
-        p.setFont(QFont("sans", 24, QFont.Bold))
-        p.drawText(QRectF(cx - r, cy - 26, 2 * r, 34), Qt.AlignCenter,
-                   "✕" if on_close else "%d/%d" % (sel + 1, sessions))
-        p.setFont(QFont("sans", 8))
-        p.setPen(QColor(255, 255, 255, 210))
-        p.drawText(QRectF(cx - r, cy + 8, 2 * r, 16), Qt.AlignCenter, "S E S S I O N")
 
 
 # ---------------------------------------------------------------------------
