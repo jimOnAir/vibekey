@@ -76,6 +76,10 @@ CONFIG_POLL = 0.5
 
 PICKER_TIMEOUT = 15.0   # s of knob silence before the wheel hides itself
                         # (owner: 15 s — enough to read the whole ring twice)
+TURN_MIN_INTERVAL = 0.10  # s between applied Wheel steps: one physical detent
+                          # can emit a burst of wheel reports; a same-direction
+                          # tick within the window is the SAME click (owner:
+                          # "the wheel is too sensitive")
 CLOSE_ID = "__close__"  # the Wheel's dedicated close slot (never a real id)
 PICKER_MAX = 12         # wheel shows up to this many root Sessions
 RAISE_DEBOUNCE = 0.35   # s of turn silence before previewing a Host (coalesces
@@ -154,6 +158,20 @@ SLOT_ORDER = ["key1", "key2", "key3", "knob", "knob_right", "knob_left"]
 
 # culprit keycap per slot for the failure blink (spec §5.4); knob/turn have no cap.
 LED_INDEX = {"key1": 0, "key2": 1, "key3": 2}
+
+
+def ago_text(ms):
+    """epoch-ms -> 'just now' / '12m ago' / '3h ago' / '5d ago' ('' if unset)"""
+    if not isinstance(ms, (int, float)) or ms <= 0:
+        return ""
+    s = max(0, int(time.time() - ms / 1000.0))
+    if s < 60:
+        return "just now"
+    if s < 3600:
+        return "%dm ago" % (s // 60)
+    if s < 86400:
+        return "%dh ago" % (s // 3600)
+    return "%dd ago" % (s // 86400)
 
 
 def log(*parts):
@@ -1475,6 +1493,9 @@ class Daemon:
         self.picker_index = 0           # wheel selection (lives apart from the Cursor)
         self.picker_rows_live = []      # cached rows while open (turns need no HTTP)
         self.picker_slots = []          # published items incl. the Close slot
+        self._branches = {}             # directory -> branch, refreshed on open
+        self._turn_at = 0.0             # last applied Wheel step (mono)
+        self._turn_dir = 0              # ...and its direction
         self.pending_raise = None       # debounced Wheel-preview host raise
         self._orca_check = (0.0, False)  # (mono_ts, bool) orca.running() cache
         # Session cycle state (spec §5.3)
@@ -1502,6 +1523,20 @@ class Daemon:
         rows = self.opencode.root_sessions()
         return [r for r in (rows or []) if isinstance(r, dict) and r.get("id")]
 
+    def branch_map(self):
+        """directory -> git branch (Orca terminals first, then managed
+        worktrees). Built once per Wheel open: the cards then show repo ·
+        branch · agent for the cached rows at zero cost per detent."""
+        m = {}
+        for rows, path_key in ((self.orca.terminals(), "worktreePath"),
+                               (self.orca.worktrees(), "path")):
+            for r in rows:
+                if isinstance(r, dict):
+                    d, b = r.get(path_key), r.get("branch")
+                    if d and b and d not in m:
+                        m[d] = str(b)
+        return m
+
     def orca_running_cached(self):
         """orca.running() spawns the CLI shim — expensive. Cache 5 s; the
         Wheel must never pay it per item (perf fix 2026-11-16)."""
@@ -1524,7 +1559,13 @@ class Daemon:
             directory = str((r.get("location") or {}).get("directory") or "")
             repo = directory.rstrip("/").split("/")[-1] if directory else ""
             host = "Orca · " + repo if repo and orca_up else (repo or "OpenCode")
-            items.append({"id": r["id"], "title": str(r.get("title") or "(untitled)"), "host": host})
+            t = r.get("time") or {}
+            busy = (isinstance(t.get("busy"), (int, float)) and isinstance(t.get("idle"), (int, float))
+                    and t["busy"] > t["idle"])          # agent worked later than it went idle
+            branch = self._branches.get(directory)
+            meta1 = " · ".join(x for x in (repo, branch, str(r.get("agent") or "")) if x)
+            items.append({"id": r["id"], "title": str(r.get("title") or "(untitled)"), "host": host,
+                          "meta1": meta1, "meta2": ago_text(t.get("updated")), "busy": busy})
         items.append({"id": CLOSE_ID, "title": "Close", "host": ""})   # separate close slot
         self.picker_slots = items
         if self.picker_open:
@@ -1552,6 +1593,7 @@ class Daemon:
             self.picker_open = True
             self.picker_deadline = time.monotonic() + PICKER_TIMEOUT
             self.picker_rows_live = rows
+            self._branches = self.branch_map() if self.orca.binary else {}
             self.picker_index = next((i for i, r in enumerate(rows[:PICKER_MAX])
                                       if r.get("id") == self.cursor_sid), 0)
             self.publish_picker()
@@ -1934,12 +1976,20 @@ class Daemon:
         elif slot in ("knob_right", "knob_left"):
             if phase == "press":
                 direction = 1 if slot == "knob_right" else -1
-                if self.picker_open:
-                    action = self.picker_turn(direction)   # browse only — press switches
-                elif preview:
-                    action = "session %+d (Preview)" % direction
+                now = time.monotonic()
+                if now - self._turn_at < TURN_MIN_INTERVAL and self._turn_dir == direction:
+                    # same detent, second tick (owner: "the wheel is too
+                    # sensitive") — one physical click = one slot, always;
+                    # a deliberate reversal passes through untouched
+                    action = "wheel burst (+%d)" % direction
                 else:
-                    action = self.step_sessions(direction, delay=RAISE_DEBOUNCE)
+                    self._turn_at, self._turn_dir = now, direction
+                    if self.picker_open:
+                        action = self.picker_turn(direction)   # browse only — press switches
+                    elif preview:
+                        action = "session %+d (Preview)" % direction
+                    else:
+                        action = self.step_sessions(direction, delay=RAISE_DEBOUNCE)
         elif slot in SLOT_LABELS:
             if self.picker_open and slot == "key3":
                 action = self.close_picker()          # ✕ is Cancel while the wheel is open

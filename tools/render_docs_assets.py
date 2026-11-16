@@ -165,10 +165,13 @@ def main():
 
 def render_ring(app):
     picker = {"open": True, "index": 1, "at": 0, "items": [
-        {"id": "s%d" % i, "title": t, "host": h} for i, (t, h) in enumerate([
-            ("OC | vibekey — port", "Orca · vibekey"), ("OC | nanox — router", "Orca · nanox"),
-            ("OC | meta — paved-roads", "Orca · meta"), ("vibekey research", "term · konsole"),
-            ("OC | orca-review", "Orca · review"), ("kernel notes", "term · yakuake")])]}
+        dict(id="s%d" % i, title=t, host=h, meta1=m, meta2=a, busy=b) for i, (t, h, m, a, b) in enumerate([
+            ("vibekey — port", "Orca · vibekey", "vibekey · wheel-v5 · build", "2m ago", False),
+            ("nanox — router", "Orca · nanox", "nanox · MDW-6102 · sisyphus", "just now", True),
+            ("meta — paved-roads", "Orca · meta", "meta · main · build", "3h ago", False),
+            ("vibekey research", "term · konsole", "vibekey · research", "1d ago", False),
+            ("orca-review", "Orca · review", "review · main · oracle", "40m ago", False),
+            ("kernel notes", "term · yakuake", "notes · master", "5d ago", False)])]}
     ov = vkpanel.RingOverlay()
     ov.sync(picker)
     for _ in range(40):

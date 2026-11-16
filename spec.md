@@ -286,14 +286,24 @@ next valid)" among the notified events).
 
 **Wheel** (owner batch 2026-11-16, replacing mode-cycling on press): knob
 press opens the Ring overlay — a pure mirror of `state.json`:
-`picker{open, items[{id,title,host}], index}`; the last item is always the
+`picker{open, items[{id,title,host,meta1,meta2,busy}], index}` (meta1 =
+`repo · branch · agent` — branch joined from Orca terminals/worktrees at
+open; meta2 = last-activity via `ago_text`; busy = `time.busy > time.idle`);
+the last item is always the
 dedicated **Close** slot (`id: "__close__"`). The Daemon owns all state; the
-Panel (`RingOverlay`: frameless, never focused, mouse-transparent, eased like
-the approved HTML prototype) only draws.
+Panel (`RingOverlay`: frameless, never focused, mouse-transparent) draws the
+ring — cards on a 42° front-arc pitch (collision-checked tiers: selection
+shows title + meta1 + meta2 with a violet busy dot, ±1 shows title + meta1,
+±2..3 titles only), the rim carries a marker per Session. Eased like the
+approved HTML prototype.
 
 Semantics (owner: "sessions switch ON PRESS", "separate close item", "15 s"):
 - **turn while open** = selection only (`picker_turn`): pure index math over
   the rows cached at open — zero HTTP, zero raises, the Cursor untouched;
+  one physical detent = one slot: same-direction wheel reports arriving
+  within TURN_MIN_INTERVAL (0.10 s) are the burst of the same click and are
+  dropped (owner: "the wheel is too sensitive"); applies to the closed-state
+  direct dial too;
 - **press while open** = commit: the selection becomes the Cursor and its
   Host is raised immediately (the one switch point); press on the Close slot
   behaves like ✕;

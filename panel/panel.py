@@ -1087,7 +1087,7 @@ class RingOverlay(QWidget):
     it previews underneath keep working; the wheel Eases between detents like
     the HTML prototype the owner approved."""
 
-    W, H = 880, 620
+    W, H = 1080, 680
     RX, RY = 250.0, 165.0
 
     def __init__(self):
@@ -1130,19 +1130,28 @@ class RingOverlay(QWidget):
     # The Wheel IS a ring (owner 2026-11-16: "still must be a ring") — but 13
     # cards at 360/13=27.7° on a 250px ellipse pack ~100px per slot against
     # 250px-wide cards: the label crawl was built into the angle math. Cards
-    # now ride the FRONT ARC at a fixed 40° pitch (Ferris wheel: the bottom
+    # now ride the FRONT ARC at a fixed 42° pitch (Ferris wheel: the bottom
     # reads first, sides rise and fade), the rim carries the whole ring, and
     # far slots simply have no card. Same picker state, same easing.
-    RX, RY = 340.0, 235.0     # rim ellipse
-    STEP_DEG = 40.0           # card pitch along the front arc
+    #
+    # Cards are tiered by depth (owner: "from the cards it's unclear what
+    # session this is"): the selection shows title + repo · branch · agent +
+    # last-activity ("working" while the agent runs); slot ±1 shows title +
+    # repo · branch; ±2..3 carry titles only. Rectangle sizes below were
+    # collision-checked for every adjacent pair at maximum text width.
+    RX, RY = 420.0, 310.0     # rim ellipse
+    STEP_DEG = 42.0           # card pitch along the front arc
     WINDOW = 3                # card slots each side of the selection
+    # per-depth: (max card width, card height, lines of meta shown)
+    TIERS = {0: (300, 74, 2), 1: (280, 64, 1), 2: (200, 52, 0), 3: (190, 46, 0)}
 
     def _place(self, k):
         """(x, y, scale, opacity) of the card k slots from the selection."""
         import math
         a = math.radians(k * self.STEP_DEG - 90.0)   # -90° = the bottom
         cx, cy = self.width() / 2.0, self.height() * 0.44
-        d = abs(k)
+        d = abs(int(round(k))) if abs(k - round(k)) < 0.02 else min(3, abs(int(k)))
+        d = min(3, d)
         return (cx + self.RX * math.cos(a), cy - self.RY * math.sin(a),
                 max(0.62, 1.0 - d * 0.125), max(0.30, 1.0 - d * 0.24))
 
@@ -1162,8 +1171,7 @@ class RingOverlay(QWidget):
         sel = round(self.cur) % n if n else 0
         # rim markers for every Session (they slide with the turn)
         for i in range(n):
-            k = depth(i)
-            a = math.radians(k * self.STEP_DEG - 90.0)
+            a = math.radians(depth(i) * self.STEP_DEG - 90.0)
             x, y = cx + self.RX * math.cos(a), cy - self.RY * math.sin(a)
             p.setBrush(QColor("#7c3aed") if i == sel else QColor(255, 255, 255, 60))
             p.setPen(Qt.NoPen)
@@ -1175,14 +1183,14 @@ class RingOverlay(QWidget):
             k = depth(i)
             if abs(k) > self.WINDOW + 0.5:
                 continue
-            self._card(p, i, *self._place(k))
+            self._card(p, i, k, *self._place(k))
         p.setPen(QColor("#8b94a0"))
         p.setFont(QFont("sans", 10))
         p.drawText(self.rect().adjusted(0, 0, 0, -8), Qt.AlignHCenter | Qt.AlignBottom,
                    "turn = select  ·  press = switch  ·  Close slot / ✕ / 15 s idle = dismiss")
 
     def _hub(self, p, cx, cy, sel):
-        r = 59.0
+        r = 48.0
         grad = QRadialGradient(cx - r * 0.3, cy - r * 0.4, r * 1.9, cx - r * 0.3, cy - r * 0.4)
         grad.setColorAt(0.0, QColor("#9d7bf7"))
         grad.setColorAt(0.55, QColor("#7c3aed"))
@@ -1201,19 +1209,21 @@ class RingOverlay(QWidget):
         p.drawText(QRectF(cx - r, cy + 8, 2 * r, 16), Qt.AlignCenter,
                    "C L O S E" if on_close else "S E S S I O N")
 
-    def _card(self, p, i, x, y, scale, op):
+    def _card(self, p, i, k, x, y, scale, op):
         it = self.items[i]
         is_close = str(it.get("id")) == "__close__"
+        tier = self.TIERS[min(3, abs(int(k)))]
         cur = (round(self.cur) % len(self.items)) == i
         title = str(it.get("title") or "")
-        host = str(it.get("host") or "")
-        f_t = QFont("sans")
-        f_t.setPointSizeF(13.0 * scale)
-        f_t.setBold(True)
-        f_h = QFont("sans")
-        f_h.setPointSizeF(9.0 * scale)
-        w = (110 if is_close else max(170, min(230, QFontMetrics(f_t).horizontalAdvance(title) + 36))) * scale
-        h = (52 if not is_close else 40) * scale
+        meta1 = str(it.get("meta1") or it.get("host") or "")
+        meta2 = str(it.get("meta2") or "")
+        f_t = QFont("sans"); f_t.setPointSizeF(13.0 * scale); f_t.setBold(True)
+        f_m = QFont("sans"); f_m.setPointSizeF(9.2 * scale)
+        base_w, base_h, lines = tier
+        if is_close:
+            base_w, base_h, lines = 130, base_h - 16, 0
+        w = min(base_w, QFontMetrics(f_t).horizontalAdvance(title) + 36) * scale
+        h = base_h * scale
         rect = QRectF(x - w / 2, y - h / 2, w, h)
         p.setOpacity(op)
         if cur:  # violet glow behind the selected card (bottom of the wheel)
@@ -1222,20 +1232,48 @@ class RingOverlay(QWidget):
             p.setBrush(Qt.NoBrush)
             p.drawRoundedRect(glow, 15, 15)
         p.setPen(QPen(QColor("#a78bfa") if cur else QColor(255, 255, 255, 60), 1.5 if cur else 1))
-        close_dim = QColor(70, 74, 82, 210) if is_close else QColor(18, 20, 26, 205)
-        p.setBrush(QColor(124, 58, 237, 210) if cur else close_dim)
+        p.setBrush(QColor(124, 58, 237, 210) if cur
+                   else (QColor(70, 74, 82, 210) if is_close else QColor(18, 20, 26, 205)))
         p.drawRoundedRect(rect, 12, 12)
-        p.setPen(QColor("#ffffff" if cur else ("#9aa3ad" if is_close else "#eff0f1")))
-        p.setFont(f_t)
-        p.drawText(rect, Qt.AlignCenter, title if is_close else
-                   QFontMetrics(f_t).elidedText(title, Qt.ElideRight, int(rect.width() - 20)))
-        if not is_close and scale > 0.85:
-            p.setPen(QColor(154, 163, 173, int(255 * op)))
-            p.setFont(f_h)
-            p.drawText(QRectF(rect.left(), rect.top() + rect.height() * 0.52, rect.width(), rect.height() * 0.3),
-                       Qt.AlignCenter, host.upper())
+        inner = rect.adjusted(10, 0, -10, 0)
+        if lines == 2:   # selection: title · meta1 · meta2(+busy)
+            p.setPen(QColor("#ffffff"))
+            p.setFont(f_t)
+            p.drawText(QRectF(inner.left(), rect.top() + 4, inner.width(), 20 * scale),
+                       Qt.AlignLeft | Qt.AlignVCenter,
+                       QFontMetrics(f_t).elidedText(title, Qt.ElideRight, int(inner.width())))
+            p.setPen(QColor(226, 232, 240, 235))
+            p.setFont(f_m)
+            p.drawText(QRectF(inner.left(), rect.top() + 26 * scale, inner.width(), 15 * scale),
+                       Qt.AlignLeft | Qt.AlignVCenter,
+                       QFontMetrics(f_m).elidedText(meta1.upper(), Qt.ElideRight, int(inner.width())))
+            m2 = meta2
+            if it.get("busy"):
+                m2 = ("working" + (" · " + m2 if m2 else ""))
+            p.setPen(QColor(154, 163, 173, 230))
+            p.drawText(QRectF(inner.left(), rect.top() + 47 * scale, inner.width(), 15 * scale),
+                       Qt.AlignLeft | Qt.AlignVCenter, m2)
+            if it.get("busy"):   # violet pulse dot on the title line
+                p.setBrush(QColor("#a78bfa")); p.setPen(Qt.NoPen)
+                p.drawEllipse(QRectF(rect.right() - 18 * scale, rect.top() + 8 * scale,
+                                     8 * scale, 8 * scale))
+        elif lines == 1:  # ±1: title + one meta line
+            p.setPen(QColor("#eff0f1"))
+            p.setFont(f_t)
+            p.drawText(QRectF(inner.left(), rect.top() + 3, inner.width(), 20 * scale),
+                       Qt.AlignLeft | Qt.AlignVCenter,
+                       QFontMetrics(f_t).elidedText(title, Qt.ElideRight, int(inner.width())))
+            p.setPen(QColor(154, 163, 173, 220))
+            p.setFont(f_m)
+            p.drawText(QRectF(inner.left(), rect.top() + 26 * scale, inner.width(), 15 * scale),
+                       Qt.AlignLeft | Qt.AlignVCenter,
+                       QFontMetrics(f_m).elidedText(meta1.upper(), Qt.ElideRight, int(inner.width())))
+        else:            # ±2..3 and Close: single line, centered
+            p.setPen(QColor("#ffffff" if cur else ("#9aa3ad" if is_close else "#eff0f1")))
+            p.setFont(f_t)
+            p.drawText(rect, Qt.AlignCenter, title if is_close else
+                       QFontMetrics(f_t).elidedText(title, Qt.ElideRight, int(rect.width() - 20)))
         p.setOpacity(1.0)
-
 
 # ---------------------------------------------------------------------------
 # Tray application
