@@ -297,6 +297,15 @@ Semantics (owner: "sessions switch ON PRESS", "separate close item", "15 s"):
 - **press while open** = commit: the selection becomes the Cursor and its
   Host is raised immediately (the one switch point); press on the Close slot
   behaves like ✕;
+
+Host-raise ladder (`raise_host`, owner 2026-11-16 after "press does nothing"):
+exact `OC | <title>` Orca tab → tab whose truncated title (`…`) is a prefix of
+the Session's within the Session's own worktree (never a bare terminal, never
+another Session's tab — the old fallback focused the wrong tab and the switch
+was invisible) → `orca worktree activate --worktree path:<dir>` when Orca
+manages that worktree → plain `wmctrl` title raise. When every rung misses the
+Cursor still moves and a desktop notification names the Session ("no Host
+window found for it") — silence is forbidden on a press.
 - **✕ (key3) while open** or PICKER_TIMEOUT (**15 s** knob silence, armed on
   open, refreshed on every turn) = dismiss; nothing changes — a browsing spin
   is inert by construction;

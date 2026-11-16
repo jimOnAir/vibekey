@@ -1571,6 +1571,10 @@ class Daemon:
         self.cursor_sid = row["id"]
         self.publish_picker()
         where = self.raise_host(row)          # the ONLY switch point, immediate
+        if where is None:
+            # cursor did move — say so, or the press feels dead (owner 2026-11-16)
+            self.fail(None, "Switched to “%s” — no Host window found for it"
+                      % (row.get("title") or row["id"]), blink=False)
         return "session %s (%s)" % (row.get("id"), where or "host not raised")
 
     def picker_turn(self, direction):
@@ -1699,19 +1703,37 @@ class Daemon:
         oc_title = "OC | " + title
         if self.orca.binary and self.orca.running():
             terms = [t for t in self.orca.terminals() if isinstance(t, dict)]
-            # title match first (Orca truncates long titles — then the worktree
-            # fallback, preferring the row that looks like an OC tab so a bare
-            # terminal in the same worktree never hijacks the raise)
+            # exact OC-titled tab, else an OC-looking tab in the same worktree.
+            # A bare terminal must NEVER hijack the raise (owner 2026-11-16:
+            # press appeared dead — the old fallback focused an unrelated
+            # plain-shell tab in the same worktree, so the tab didn't change)
             match = next((t for t in terms if t.get("title") == oc_title), None)
             if match is None and directory:
-                oc_rows = [t for t in terms if t.get("worktreePath") == directory
-                           and str(t.get("title") or "").startswith("OC |")]
-                match = oc_rows[0] if oc_rows else next(
-                    (t for t in terms if t.get("worktreePath") == directory), None)
+                # Orca truncates long tab titles with an ellipsis ("…"): accept
+                # the truncated prefix ONLY inside the Session's own worktree —
+                # never a bare terminal, never another Session's OC tab (owner
+                # 2026-11-16: press looked dead — the old worktree fallback
+                # focused the WRONG tab and the user saw no switch)
+                for t in terms:
+                    tt = str(t.get("title") or "")
+                    if t.get("worktreePath") != directory or not tt.startswith("OC |"):
+                        continue
+                    stem = tt.rstrip("\u2026.")
+                    if stem != tt and oc_title.startswith(stem):
+                        match = t
+                        break
             if match:
                 self.orca.switch_terminal(match.get("handle"))
                 raise_pids(pids_named("orca-ide"))
                 return "orca"
+            # no Orca tab runs this Session: if Orca manages the worktree,
+            # open that worktree on screen (most Out of most Sessions with no tab)
+            if directory:
+                for w in self.orca.worktrees():
+                    if isinstance(w, dict) and w.get("path") == directory:
+                        self.orca._run(["worktree", "activate", "--worktree", "path:" + directory])
+                        raise_pids(pids_named("orca-ide"))
+                        return "orca-worktree"
         if raise_title(oc_title):
             return "wmctrl"
         return None
