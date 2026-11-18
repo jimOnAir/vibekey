@@ -37,7 +37,10 @@ if [[ -n $bump ]]; then
   sed -i -E "s/^pkgrel=${rel}$/pkgrel=$((rel + 1))/" PKGBUILD
   git add PKGBUILD
   git commit -q -m "pkgrel=$((rel + 1)): ${bump}"
-  echo "bumped pkgrel -> $((rel + 1)) (committed)"
+  # keep origin level: the bump commit must not be left dangling (owner
+  # 2026-11-18: "did you push?" — the pkgrel tail used to lag a turn)
+  git push -q origin HEAD || echo "WARNING: bump committed but push failed — git push manually" >&2
+  echo "bumped pkgrel -> $((rel + 1)) (committed, pushed)"
 fi
 
 source ./PKGBUILD            # plain variable assignments + functions; safe
