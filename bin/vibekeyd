@@ -86,6 +86,8 @@ HOLD_REPEAT_SECONDS = 0.12  # while a long_press key stays held past
                             # "holding should continuously delete the last
                             # word", then: make the repeat faster)
 CLOSE_ID = "__close__"  # the Wheel's dedicated close slot (never a real id)
+BACK_ID = "__back__"    # the Wheel's level-2 back slot (never a real id)
+HOME_HINT = os.path.expanduser("~")   # cards show ~ instead of the long home path
 PICKER_MAX = 12         # wheel shows up to this many root Sessions
 RAISE_DEBOUNCE = 0.35   # s of turn silence before previewing a Host (coalesces
                         # a spin into ONE CLI raise — the Wheel itself is instant)
@@ -1524,6 +1526,12 @@ class Daemon:
         self.picker_index = 0           # wheel selection (lives apart from the Cursor)
         self.picker_rows_live = []      # cached rows while open (turns need no HTTP)
         self.picker_slots = []          # published items incl. the Close slot
+        self.picker_level = 1           # 1 = Projects, 2 = Worktrees (§5.3)
+        self.picker_project = None      # project id chosen at level 1
+        self.picker_project_label = None
+        self._worktrees = []            # Orca worktree rows, refreshed on open
+        self._other_dirs = []           # session dirs outside any worktree
+        self._cover_paths = {}          # project id -> covered worktree paths
         self._slot_press_at = {}        # slot -> press timestamp (long_press decisions)
         self._branches = {}             # directory -> branch, refreshed on open
         self._turn_at = 0.0             # last applied Wheel step (mono)
@@ -1579,30 +1587,27 @@ class Daemon:
 
     def publish_picker(self, rows=None):
         """state.json: picker — the Panel's wheel mirrors this exactly. Turns
-        while open are pure index math over cached rows (no HTTP, no raises):
-        selection != switching until press. `ring` (always current) feeds the
-        Panel header."""
+        while open are pure index math over cached data (no HTTP, no raises):
+        selection != switching until press. Two levels (owner 2026-11-18):
+        1 = Projects (Orca repos + an Other bucket), 2 = worktrees/sessions
+        of the chosen Project. `ring` (always current) feeds the Panel header."""
         if rows is not None:
             self.picker_rows_live = rows
         rows = self.picker_rows_live
-        orca_up = self.orca_running_cached()
-        items = []
-        for r in rows[:PICKER_MAX]:
-            directory = str((r.get("location") or {}).get("directory") or "")
-            repo = directory.rstrip("/").split("/")[-1] if directory else ""
-            host = "Orca · " + repo if repo and orca_up else (repo or "OpenCode")
-            t = r.get("time") or {}
-            busy = (isinstance(t.get("busy"), (int, float)) and isinstance(t.get("idle"), (int, float))
-                    and t["busy"] > t["idle"])          # agent worked later than it went idle
-            branch = self._branches.get(directory)
-            meta1 = " · ".join(x for x in (repo, branch, str(r.get("agent") or "")) if x)
-            items.append({"id": r["id"], "title": str(r.get("title") or "(untitled)"), "host": host,
-                          "meta1": meta1, "meta2": ago_text(t.get("updated")), "busy": busy})
-        items.append({"id": CLOSE_ID, "title": "Close", "host": ""})   # separate close slot
+        if not self.picker_open:
+            self.picker_level = 1
+            self.picker_project = None    # a closed wheel always rests at L1
+        if self.picker_level == 2 and self.picker_project is not None:
+            items = self.build_level2(self.picker_project)
+        else:
+            self.picker_level = 1
+            items = self.build_level1()
         self.picker_slots = items
         if self.picker_open:
             self.picker_index = max(0, min(self.picker_index, len(items) - 1))
-            self.state.set(picker={"open": True, "items": items, "index": self.picker_index,
+            self.state.set(picker={"open": True, "level": self.picker_level,
+                                   "project": self.picker_project_label,
+                                   "items": items, "index": self.picker_index,
                                    "at": time.time()})
         else:
             self.state.set(picker=None)
@@ -1613,10 +1618,163 @@ class Daemon:
                 "at": time.time()}
         self.state.set(ring=ring)
 
+    # ---- two-level index (built once per open; rows are already cached) -----
+
+    def _rows_under(self, directory):
+        """Sessions at or beneath `directory`, newest first."""
+        def d(r):
+            return str((r.get("location") or {}).get("directory") or "")
+        out = [r for r in self.picker_rows_live if d(r) == directory
+               or d(r).startswith(directory.rstrip("/") + "/")]
+        out.sort(key=lambda r: ((r.get("time") or {}).get("updated") or 0), reverse=True)
+        return out
+
+    @staticmethod
+    def _latest(rows):
+        return ((rows[0].get("time") or {}).get("updated") or 0) if rows else 0
+
+    @staticmethod
+    def _any_busy(rows):
+        def b(r):
+            t = r.get("time") or {}
+            return (isinstance(t.get("busy"), (int, float)) and isinstance(t.get("idle"), (int, float))
+                    and t["busy"] > t["idle"])
+        return any(b(r) for r in rows[:8])
+
+    @staticmethod
+    def _name(path):
+        return str(path).rstrip("/").split("/")[-1] or str(path)
+
+    def _group_worktrees(self):
+        """repoId -> worktree rows (Orca-managed only)."""
+        by_repo = {}
+        for w in self._worktrees:
+            if isinstance(w, dict) and w.get("path"):
+                by_repo.setdefault(w.get("repoId") or w["path"], []).append(w)
+        return by_repo
+
+    def build_level1(self):
+        """Projects: repos of Orca worktrees + Other (session dirs outside any
+        of them), each with worktree/session counts and last activity."""
+        by_repo = self._group_worktrees()
+        covered = set()
+        for group in by_repo.values():
+            covered.update(str(w["path"]).rstrip("/") for w in group)
+        def in_covered(r):
+            d = str((r.get("location") or {}).get("directory") or "").rstrip("/")
+            return any(d == c or d.startswith(c + "/") for c in covered)
+        items = []
+        for repo, group in by_repo.items():
+            paths = [str(w["path"]).rstrip("/") for w in group]
+            def mine(r, paths=paths):
+                d = str((r.get("location") or {}).get("directory") or "").rstrip("/")
+                return any(d == c or d.startswith(c + "/") for c in paths)
+            sess = [r for r in self.picker_rows_live if mine(r)]
+            label = next((self._name(w["path"]) for w in group if w.get("isMainWorktree")),
+                         self._name(group[0]["path"]))
+            act = self._latest(sess)
+            items.append({"id": "repo:" + str(repo), "title": label, "host": "",
+                          "meta1": "%d worktrees · %d sessions" % (len(group), len(sess)),
+                          "meta2": ago_text(act) + (" · working" if self._any_busy(sess) else ""),
+                          "_sort": act})
+        orphans = {}
+        for r in self.picker_rows_live:
+            d = str((r.get("location") or {}).get("directory") or "").rstrip("/")
+            if not in_covered(r) and d:
+                orphans.setdefault(d, []).append(r)
+        if orphans:
+            act = max(self._latest(rows) for rows in orphans.values())
+            items.append({"id": "other", "title": "Other", "host": "",
+                          "meta1": "%d folders · %d sessions" % (len(orphans), sum(map(len, orphans.values()))),
+                          "meta2": ago_text(act), "_sort": act})
+            self._other_dirs = sorted(orphans, key=lambda d: self._latest(orphans[d]), reverse=True)
+        else:
+            self._other_dirs = []
+        items.sort(key=lambda it: it["_sort"], reverse=True)
+        for it in items[:PICKER_MAX]:
+            it.pop("_sort", None)
+            it.pop("_paths", None)
+        items = items[:PICKER_MAX]
+        items.append({"id": CLOSE_ID, "title": "Close", "host": ""})
+        self.picker_project_label = None
+        return items
+
+    def _project_group(self, repo_key):
+        if repo_key == "other":
+            return []
+        return self._group_worktrees().get(repo_key[5:], [])
+
+    def build_level2(self, repo_key):
+        """Worktrees of one Project (or bare dirs in Other), newest activity
+        first; every row carries the session it would switch to."""
+        items = []
+        if repo_key == "other":
+            self.picker_project_label = "Other"
+            for d in self._other_dirs[:PICKER_MAX - 2]:
+                rows = self._rows_under(d)
+                act = self._latest(rows)
+                items.append({"id": "dir:" + d, "title": self._name(d), "host": "",
+                              "meta1": d.replace(HOME_HINT, "~"),
+                              "meta2": "%d sessions · %s" % (len(rows), ago_text(act))
+                                       if rows else "no sessions",
+                              "busy": self._any_busy(rows), "_sort": act})
+        else:
+            group = self._project_group(repo_key)
+            self.picker_project_label = next((self._name(w["path"]) for w in group if w.get("isMainWorktree")),
+                                             self._name(group[0]["path"]) if group else "?")
+            scored = sorted(group, key=lambda w: self._latest(self._own_rows(str(w["path"]))),
+                            reverse=True)
+            for w in scored[:PICKER_MAX - 2]:
+                path = str(w["path"]).rstrip("/")
+                rows = self._own_rows(path)
+                act = self._latest(rows)
+                title = str(w.get("displayName") or w.get("branch") or self._name(path))
+                items.append({"id": "wt:" + path, "title": title, "host": "",
+                              "meta1": str(w.get("branch") or ""),
+                              "meta2": ("%d sessions · %s" % (len(rows), ago_text(act)))
+                                       if rows else "no session",
+                              "busy": self._any_busy(rows), "_sort": act})
+        for it in items:
+            it.pop("_sort", None)
+        items.append({"id": BACK_ID, "title": "↑ Back", "host": ""})
+        items.append({"id": CLOSE_ID, "title": "Close", "host": ""})
+        return items
+
+    def _own_rows(self, path):
+        """Sessions belonging to `path` — a Session is owned by the LONGEST
+        worktree path covering it, so /w/platform never shadows /w/platform/5945
+        (same rule as build_level2's ordering and _index_for_dir)."""
+        path = str(path).rstrip("/")
+        others = [str(w.get("path") or "").rstrip("/") for w in self._worktrees
+                  if isinstance(w, dict) and w.get("path")
+                  and len(str(w["path"]).rstrip("/")) > len(path)]
+        def owned(r):
+            d = str((r.get("location") or {}).get("directory") or "").rstrip("/")
+            return not any(d == q or d.startswith(q + "/") for q in others)
+        return [r for r in self._rows_under(path) if owned(r)]
+
+    def _cursor_dir(self):
+        row = next((r for r in self.picker_rows_live if r.get("id") == self.cursor_sid), None)
+        return str(((row or {}).get("location") or {}).get("directory") or "").rstrip("/")
+
+    def _index_for_dir(self, items, directory):
+        """Slot whose item covers `directory` — the LONGEST covering path
+        wins (a bare worktree root must not steal its own subdir slots)."""
+        best, best_len = 0, -1
+        for i, it in enumerate(items):
+            ident = str(it.get("id") or "")
+            paths = ([ident.split(":", 1)[1]] if ident.startswith(("wt:", "dir:"))
+                     else getattr(self, "_cover_paths", {}).get(ident, []))
+            for p in paths:
+                if (directory == p or directory.startswith(p + "/")) and len(p) > best_len:
+                    best, best_len = i, len(p)
+        return best
+
     def toggle_picker(self):
-        """Knob press: closed -> open (selection starts at the Cursor);
-        open -> CONFIRM: switch to the selected Session — or just close when
-        the selection sits on the Close slot (owner: switch ON PRESS)."""
+        """Knob press. Level 1: open the wheel, or descend into the selected
+        Project. Level 2: pick a Worktree (switch to its newest Session and
+        raise the Host), go Back, or Close (owner: switch ON PRESS; two-level
+        carousel 2026-11-18)."""
         if not self.picker_open:
             rows = self.picker_rows()
             if not rows:
@@ -1626,30 +1784,81 @@ class Daemon:
             self.picker_deadline = time.monotonic() + PICKER_TIMEOUT
             self.picker_rows_live = rows
             self._branches = self.branch_map() if self.orca.binary else {}
-            self.picker_index = next((i for i, r in enumerate(rows[:PICKER_MAX])
-                                      if r.get("id") == self.cursor_sid), 0)
+            self._worktrees = self.orca.worktrees() if self.orca.binary else []
+            self.picker_level = 1
+            self.picker_project = None
+            items = self.build_level1()
+            self._cover_paths = {}
+            for repo, group in self._group_worktrees().items():
+                self._cover_paths["repo:" + str(repo)] = [str(w["path"]).rstrip("/") for w in group]
+            self._cover_paths["other"] = list(self._other_dirs)
+            self.picker_slots = items
+            self.picker_index = self._index_for_dir(items, self._cursor_dir())
             self.publish_picker()
-            return "picker open (%d sessions)" % min(len(rows), PICKER_MAX)
+            return "picker open (%d projects)" % (len(items) - 1)
         slot = self.picker_slots[self.picker_index] if self.picker_slots else None
         if slot is None or slot.get("id") == CLOSE_ID:
             return self.close_picker()
+        if slot.get("id") == BACK_ID:
+            self.picker_level = 1
+            self.picker_project = None
+            self.publish_picker()
+            self.picker_index = self._index_for_dir(self.picker_slots, self._cursor_dir())
+            self.publish_picker()
+            return "picker ← projects"
         if self.preview_active():
             self.picker_open = False
             self.publish_picker()
             return "picker closed (Preview — no switch)"
-        row = next((r for r in self.picker_rows_live if r.get("id") == slot["id"]), None)
+        ident = str(slot.get("id") or "")
+        if self.picker_level == 1 and (ident.startswith("repo:") or ident == "other"):
+            self.picker_level = 2
+            self.picker_project = ident
+            items = self.build_level2(ident)
+            self.picker_slots = items
+            self.picker_index = self._index_for_dir(items, self._cursor_dir())
+            self.publish_picker()
+            kind = "folders" if ident == "other" else "worktrees"
+            return "picker → %s (%d %s)" % (self.picker_project_label,
+                                            sum(1 for it in items if str(it["id"]).startswith(("wt:", "dir:"))), kind)
+        if ident.startswith(("wt:", "dir:")):
+            return self.picker_choose_dir(ident.split(":", 1)[1])
+        # legacy flat session id (wheel opened in compat mode) — old path
         self.picker_open = False
+        row = next((r for r in self.picker_rows_live if r.get("id") == ident), None)
         if row is None:
             self.publish_picker()
             return "picker closed (session gone)"
         self.cursor_sid = row["id"]
         self.publish_picker()
-        where = self.raise_host(row)          # the ONLY switch point, immediate
+        where = self.raise_host(row)
         if where is None:
-            # cursor did move — say so, or the press feels dead (owner 2026-11-16)
             self.fail(None, "Switched to “%s” — no Host window found for it"
                       % (row.get("title") or row["id"]), blink=False)
         return "session %s (%s)" % (row.get("id"), where or "host not raised")
+
+    def picker_choose_dir(self, path):
+        """The switch point of level 2: newest Session under `path` becomes
+        the Cursor (immediate raise); with no Session there, raise the
+        Orca worktree itself."""
+        rows = self._own_rows(path)
+        self.picker_open = False
+        self.picker_level = 1
+        self.picker_project = None      # next open starts at Projects
+        if rows:
+            self.cursor_sid = rows[0]["id"]
+            self.publish_picker()
+            where = self.raise_host(rows[0])
+            if where is None:
+                self.fail(None, "Switched to “%s” — no Host window found for it"
+                          % (rows[0].get("title") or rows[0]["id"]), blink=False)
+            return "session %s (%s)" % (rows[0]["id"], where or "host not raised")
+        self.publish_picker()
+        if self.orca.binary and self.orca.running():
+            self.orca._run(["worktree", "activate", "--worktree", "path:" + path])
+            raise_pids(pids_named("orca-ide"))
+            return "worktree %s (activated — no Session)" % self._name(path)
+        return "worktree %s (nothing to raise)" % self._name(path)
 
     def picker_turn(self, direction):
         """Turn while the wheel is open: move the selection only — no HTTP,
@@ -1669,6 +1878,8 @@ class Daemon:
         if not self.picker_open:
             return None
         self.picker_open = False
+        self.picker_level = 1
+        self.picker_project = None      # next open always starts at Projects
         self.publish_picker()
         return "picker closed"
 

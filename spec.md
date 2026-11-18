@@ -295,7 +295,15 @@ next valid)" among the notified events).
 
 **Wheel** (owner batch 2026-11-16, replacing mode-cycling on press): knob
 press opens the Ring overlay — a pure mirror of `state.json`:
-`picker{open, items[{id,title,host,meta1,meta2,busy}], index}` (meta1 =
+`picker{open, level, project, items[{id,title,host,meta1,meta2,busy}], index}`
+(two-level 2026-11-18: level 1 Projects = Orca repos by repoId + an `other`
+bucket of uncovered session dirs, capped PICKER_MAX by activity, ids
+`repo:<id>`/`other`; level 2 = its worktrees `wt:<path>` (Other: `dir:<path>`)
++ `__back__` + `__close__`; a Session belongs to the LONGEST covering
+worktree path — `_own_rows` — so roots never shadow sub-worktrees; press at
+L1 descends, press at L2 = `picker_choose_dir` (newest Session → Cursor +
+raise, else `orca worktree activate`); ✕ closes from any level, Back slot
+returns to L1; meta1 =
 `repo · branch · agent` — branch joined from Orca terminals/worktrees at
 open; meta2 = last-activity via `ago_text`; busy = `time.busy > time.idle`);
 the last item is always the
@@ -315,7 +323,7 @@ Semantics (owner: "sessions switch ON PRESS", "separate close item", "15 s"):
   direct dial too;
 - **press while open** = commit: the selection becomes the Cursor and its
   Host is raised immediately (the one switch point); press on the Close slot
-  behaves like ✕;
+  behaves like ✕ (from either level of the two-level Wheel);
 
 Host-raise ladder (`raise_host`, owner 2026-11-16 after "press does nothing"):
 exact `OC | <title>` Orca tab → tab whose truncated title (`…`) is a prefix of

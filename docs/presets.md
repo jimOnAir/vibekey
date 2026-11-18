@@ -55,15 +55,17 @@ RTX-class GPU beat CPU by ~30 % on short dictations.
 ## The Ring & the Wheel
 
 The knob is the **Session Ring** dial. Press it and the **Wheel** opens over
-the screen (drawn by the Panel): every Session with its Host badge, the
-**Close** slot, as a ring: the selection glows at the bottom of the wheel,
-its neighbours rise along the sides and fade, the rim carries every Session.
-Turning while the Wheel is
-open *only selects* — nothing switches, no windows move. **Press switches**:
-the selection becomes the Cursor and its Host is raised (Orca tab plus window
-raise, or plain-terminal raise). Press on the Close slot, ✕, or fifteen idle
-seconds dismiss without changing anything. With the Wheel closed, plain knob
-turns still dial the Ring directly (debounced live raise) for quick stepping.
+the screen (drawn by the Panel) as a **two-level carousel**: level 1 lists
+your **Projects** (Orca repos plus an Other bucket for loose folders, each
+with worktree & session counts and last activity — working ones flagged);
+press a project to descend to its **Worktrees**, press a worktree to switch
+to its newest Session and raise the Host (or open the Orca worktree if it
+has no Session yet). The selection glows at the bottom of the ring, its
+neighbours rise along the sides and fade; turning always *only selects*.
+A worktree owns each Session by its longest path, so `/w/platform` never
+steals `/w/platform/5945`'s. **↑ Back** hops a level up; the **Close** slot,
+✕, or fifteen idle seconds dismiss. With the Wheel closed, plain knob turns
+still dial the Ring directly (debounced live raise) for quick stepping.
 Selection and Cursor are deliberately separate while browsing: the Wheel is a
 chooser, and only the press commits.
 
