@@ -37,8 +37,8 @@ respected (only a *missing* file is seeded).
     },
     "key2": { "preset": "session_next", "label": "Next Session",
               "behavior": "session.next" },
-    "key3": { "preset": "session_interrupt", "label": "Interrupt",
-              "behavior": "session.interrupt" }
+    "key3": { "preset": "erase_char_word", "label": "Erase char (hold = word)",
+              "keys": "BackSpace", "long_press": "ctrl+BackSpace" }
   },
 
   "lighting": {                      // every key optional — defaults in code

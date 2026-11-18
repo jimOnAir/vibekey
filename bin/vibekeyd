@@ -293,7 +293,7 @@ def preset_entry(preset, tag, fields):
     return entry
 
 
-ENTRY_FIELDS = ("behavior", "dir", "command", "keys", "release_command", "release_keys", "scroll")
+ENTRY_FIELDS = ("behavior", "dir", "command", "keys", "release_command", "release_keys", "scroll", "long_press")
 
 
 def default_buttons(catalogue):
@@ -1519,6 +1519,7 @@ class Daemon:
         self.picker_index = 0           # wheel selection (lives apart from the Cursor)
         self.picker_rows_live = []      # cached rows while open (turns need no HTTP)
         self.picker_slots = []          # published items incl. the Close slot
+        self._slot_press_at = {}        # slot -> press timestamp (long_press decisions)
         self._branches = {}             # directory -> branch, refreshed on open
         self._turn_at = 0.0             # last applied Wheel step (mono)
         self._turn_dir = 0              # ...and its direction
@@ -2022,13 +2023,33 @@ class Daemon:
                 action = action or None
             else:
                 entry = self.config.button(raw_id, slot)
-                action = self.describe_action(entry, phase) if preview else self.run_action(entry, phase, slot)
+                long_keys = entry.get("long_press") if isinstance(entry, dict) else None
+                if isinstance(long_keys, str) and long_keys.strip():
+                    # tap vs hold, same release-edge decision as the knob
+                    # (owner 2026-11-18: ✕ erases the last character — tap —
+                    # or the last word — hold ≥ LONG_PRESS_SECONDS)
+                    if phase == "press":
+                        self._slot_press_at[slot] = time.monotonic()
+                    elif slot in self._slot_press_at:
+                        held = time.monotonic() - self._slot_press_at.pop(slot)
+                        if preview:
+                            action = ("hold → %s (Preview)" % long_keys if held >= LONG_PRESS_SECONDS
+                                      else "tap → %s (Preview)" % entry.get("keys"))
+                        elif held >= LONG_PRESS_SECONDS:
+                            if xdo_key(long_keys):
+                                action = "keys %s (long-press)" % long_keys.strip()
+                            else:
+                                self.state.set(error="Unknown key combo: %s" % long_keys)
+                        else:
+                            action = self.run_action(entry, "press", slot)
+                else:
+                    action = self.describe_action(entry, phase) if preview else self.run_action(entry, phase, slot)
         if self.probe:
             print("%s %-14s %-24s slot=%-10s action=%s" % (time.strftime("%H:%M:%S"), raw_id, label, slot or "-", action or "-"), flush=True)
         if phase != "press":
-            # the knob's decision (mode cycle vs Enter) lands on the release
-            # edge — narrate it onto the existing press-time last event
-            if slot == "knob" and action:
+            # release-edge decisions (knob Enter, ✕ erase-word) land after the
+            # press-time last event — narrate them onto it
+            if action and (slot == "knob" or (isinstance(entry, dict) and entry.get("long_press"))):
                 last = dict(self.state.data.get("last") or {})
                 last.update(action=action, at=time.time())
                 self.state.set(last=last)

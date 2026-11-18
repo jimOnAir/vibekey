@@ -57,7 +57,7 @@ def handy_store_path():
     return HANDY_STORE
 
 LONG_MS = 400
-ENTRY_FIELDS = ("behavior", "dir", "command", "keys", "release_command", "release_keys", "scroll")
+ENTRY_FIELDS = ("behavior", "dir", "command", "keys", "release_command", "release_keys", "scroll", "long_press")
 
 # zone key -> (slot, caption) mirroring the physical device (spec §8)
 ZONES = [

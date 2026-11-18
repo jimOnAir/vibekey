@@ -141,8 +141,8 @@ vs *RAN (sim)* for its own simulated clicks (§8).
              "behavior": "dictation.ptt", "keys": "ctrl+alt+space"},
     "key2": {"preset": "session_next", "label": "Next Session",
              "behavior": "session.next"},
-    "key3": {"preset": "session_interrupt", "label": "Interrupt",
-             "behavior": "session.interrupt"}
+    "key3": {"preset": "erase_char_word", "label": "Erase char (hold = word)",
+             "keys": "BackSpace", "long_press": "ctrl+BackSpace"}
   },
   "lighting": {
     "mode_ring": true, "fail_blink": true, "low_battery": true,
@@ -162,10 +162,14 @@ vs *RAN (sim)* for its own simulated clicks (§8).
   `kbd:0x4f`/`kbd:0x2a`→knob_right/left); the `aliases` map wins over it, as upstream.
 - **`buttons.<slot>` entry fields** — `preset` (catalogue id, informational),
   `label`, and execution fields copied from the catalogue at seed/edit time
-  (`command`, `keys`, `release_command`, `release_keys`, `scroll`) **plus the one
+  (`command`, `keys`, `release_command`, `release_keys`, `scroll`, `long_press`) **plus the one
   new field `"behavior"`** (§4.2). Dispatch order: `behavior` → built-in (§5);
   else `keys` → xdotool one-shot; else `command` → `bash -c` (with
   `release_command`/`release_keys` on the release edge, as upstream).
+  An entry carrying `long_press` defers both edges to release (owner
+  2026-11-18, the ✕ eraser): held < `LONG_PRESS_SECONDS` runs the press
+  action (`keys`), held ≥ it types `long_press` instead — decided exactly
+  like the knob's Enter.
   `vibekey-config`'s `ALLOWED_BUTTON_KEYS` gains `behavior` + `keys`/`label` as
   already allowed.
 - **`knob_modes`** — **retired 2026-11-16** (owner: "мне не нужны другие
@@ -251,7 +255,9 @@ entirely** — documented known gap (ticket 6).
 ### 5.3 Agent Presets (ticket 6, on tickets 3/4's mechanisms)
 
 **Control map**: ✓ Confirm = *next Session* (fixed default), ✕ Cancel =
-*interrupt* (fixed default), knob **press** = toggle the **Wheel** (§5.3),
+*erase* (default 2026-11-18: tap `BackSpace`, hold `Ctrl+BackSpace`; the
+`session_interrupt` preset stays in the catalogue for whoever rebinds it),
+knob **press** = toggle the **Wheel** (§5.3),
 knob **long-press** (≥400 ms, decided on the release edge) = Enter injection
 (`xdotool key Return`, fixed — ticket 6), knob **turn** = Ring step ±1.
 
@@ -531,7 +537,7 @@ Schema `version: 1` + `defaults` + `presets` (`knob_turn` retired 2026-11-16 wit
 
 ```json
 "defaults": {
-  "key1": "dictation_ptt", "key2": "session_next", "key3": "session_interrupt"
+  "key1": "dictation_ptt", "key2": "session_next", "key3": "erase_char_word"
 }
 ```
 
@@ -552,6 +558,7 @@ defaults, and the fixed controls' wiring to them.
 | Agent | `session_prev` | Previous Session | `behavior: session.prev` |
 | Agent | `session_focus` | Focus this Session's terminal | `behavior: session.focus` |
 | Agent | `session_interrupt` | Interrupt | `behavior: session.interrupt` |
+| Editing | `erase_char_word` | Erase last char (hold = word) | `keys: "BackSpace"`, `long_press: "ctrl+BackSpace"` |
 | Agent | `orca_worktree_next` | Next Orca worktree | `behavior: orca.worktree.next` |
 | Agent | `orca_worktree_prev` | Previous Orca worktree | `behavior: orca.worktree.prev` |
 | Keys | `key_enter` | Press Enter | `keys: "Return"` |

@@ -3,7 +3,7 @@
   "defaults": {
     "key1": "dictation_ptt",
     "key2": "session_next",
-    "key3": "session_interrupt"
+    "key3": "erase_char_word"
   },
   "presets": [
     {
@@ -195,6 +195,14 @@
       "label": "Brightness -5 %",
       "description": "brightnessctl set 5%-",
       "command": "brightnessctl set 5%-"
+    },
+    {
+      "id": "erase_char_word",
+      "group": "Editing",
+      "label": "Erase last char (hold = word)",
+      "description": "BackSpace on tap; hold ≥400 ms → Ctrl+BackSpace (last word). While the Wheel is open ✕ still closes it first.",
+      "keys": "BackSpace",
+      "long_press": "ctrl+BackSpace"
     }
   ]
 }

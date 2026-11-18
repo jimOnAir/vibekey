@@ -13,7 +13,7 @@ defaults shown come from the shipped catalogue and survive upgrades untouched.
 |---|---|---|
 | 🎙 Voice key | Dictation (hold, handy) | see [Dictation](#dictation) |
 | ✓ Confirm | Next Session | advance the **Ring** of root Sessions, raise the new one's **Host** |
-| ✕ Cancel | Interrupt | stop the agent — see [Interrupt](#interrupt) |
+| ✕ Cancel | Erase | tap = last character, hold = last word — see [Erase & Interrupt](#erase--interrupt) |
 | Knob press | toggle the **Wheel** | on-screen Ring of Sessions; press again = confirm selection |
 | Knob long-press (≥400 ms) | Enter | one `Return` keystroke — sized to accept permission prompts |
 | Knob turn | step the **Ring** | select ±1 Session; its Host raises live, under the Wheel |
@@ -98,9 +98,17 @@ blocks on a permission prompt the knob ring runs the **alarm** rhythm and the
 Panel says *hold the knob for Enter* — the accept gesture meets the request
 where it is raised (switch under Lighting).
 
-### Interrupt
+### Erase & Interrupt
 
-✕ Cancel stops the run with the gentlest mechanism that exists, in order:
+✕ Cancel is the **eraser** (owner 2026-11-18): a tap sends `BackSpace` — the
+last character; hold it ≥400 ms and the release sends `Ctrl+BackSpace` — the
+last word. The tap/hold choice resolves on release, like the knob's Enter.
+While the Wheel is open ✕ keeps its older meaning: it closes the Wheel, and
+does not erase.
+
+**Interrupt did not vanish — it moved to the catalogue.** Bind the
+`session_interrupt` preset (or any behavior) to a key through the Panel to
+stop the run with the gentlest mechanism that exists, in order:
 
 1. `POST /api/session/{id}/interrupt` — idempotent, works with no focus;
 2. `orca terminal send --interrupt` (Orca-native PTY level);

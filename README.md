@@ -24,7 +24,7 @@ OpenCode/Orca agent Presets — planned entirely as a
 |---|---|---|
 | 🎙 **Voice key** | **Dictation** | hold-to-talk via [handy](docs/presets.md#dictation) — release, and text appears (~0.5–2 s) |
 | ✓ **Confirm** | **Next Session** | step the Ring of OpenCode Sessions; raises each Session's Host |
-| ✕ **Cancel** | **Interrupt** | stop the agent — API-first, never `Ctrl+C` |
+| ✕ **Cancel** | **Erase** | tap = back one character, hold ≥400 ms = one word; while the Wheel is open ✕ closes it |
 | **Knob press** | open the **Wheel** | the on-screen carousel of Sessions; press again to **switch** to the selection (press on **Close** = dismiss) |
 | **Knob long-press** | `Enter` | accepts agent permission prompts without touching the keyboard |
 | **Knob turn** | move the **Ring** | Wheel open: selects only — no switch until you press; Wheel closed: steps and raises the Host live |
