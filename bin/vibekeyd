@@ -80,6 +80,10 @@ TURN_MIN_INTERVAL = 0.10  # s between applied Wheel steps: one physical detent
                           # can emit a burst of wheel reports; a same-direction
                           # tick within the window is the SAME click (owner:
                           # "the wheel is too sensitive")
+HOLD_REPEAT_SECONDS = 0.22  # while a long_press key stays held past
+                            # LONG_PRESS_SECONDS, its combo repeats at this
+                            # cadence — continuous erase (owner 2026-11-18:
+                            # "holding should continuously delete the last word")
 CLOSE_ID = "__close__"  # the Wheel's dedicated close slot (never a real id)
 PICKER_MAX = 12         # wheel shows up to this many root Sessions
 RAISE_DEBOUNCE = 0.35   # s of turn silence before previewing a Host (coalesces
@@ -1916,6 +1920,19 @@ class Daemon:
 
     # ---- plain (non-behavior) actions ----------------------------------------
 
+    def tick_hold(self, now):
+        """long_press keys held past LONG_PRESS_SECONDS keep firing their
+        combo every HOLD_REPEAT_SECONDS — continuous erase until release
+        (owner 2026-11-18). Preview never fires; the release edge settles
+        taps and narrates the total."""
+        for slot, entry in list(self._slot_press_at.items()):
+            pressed_at, combo, reps, next_at = entry
+            if self.preview_active() or now < next_at:
+                continue
+            if now - pressed_at >= LONG_PRESS_SECONDS and xdo_key(combo):
+                self._slot_press_at[slot] = (pressed_at, combo, reps + 1,
+                                             next_at + HOLD_REPEAT_SECONDS)
+
     def run_action(self, entry, phase, slot=None):
         """phase is 'press' or 'release'. Returns a short description or None."""
         if not isinstance(entry, dict):
@@ -2025,21 +2042,29 @@ class Daemon:
                 entry = self.config.button(raw_id, slot)
                 long_keys = entry.get("long_press") if isinstance(entry, dict) else None
                 if isinstance(long_keys, str) and long_keys.strip():
-                    # tap vs hold, same release-edge decision as the knob
-                    # (owner 2026-11-18: ✕ erases the last character — tap —
-                    # or the last word — hold ≥ LONG_PRESS_SECONDS)
+                    # tap vs hold, same release-edge decision as the knob —
+                    # but holding keeps FIREING: the combo repeats while the
+                    # key is down (owner 2026-11-18: continuous word-erase).
+                    # value: (pressed_at, combo, reps_done, next_fire_at)
                     if phase == "press":
-                        self._slot_press_at[slot] = time.monotonic()
+                        if slot not in self._slot_press_at:      # ignore re-arms (autorepeat)
+                            now_p = time.monotonic()
+                            self._slot_press_at[slot] = (now_p, long_keys, 0,
+                                                         now_p + LONG_PRESS_SECONDS)
                     elif slot in self._slot_press_at:
-                        held = time.monotonic() - self._slot_press_at.pop(slot)
+                        pressed_at, long_keys, reps, _next = self._slot_press_at.pop(slot)
+                        held = time.monotonic() - pressed_at
                         if preview:
                             action = ("hold → %s (Preview)" % long_keys if held >= LONG_PRESS_SECONDS
                                       else "tap → %s (Preview)" % entry.get("keys"))
                         elif held >= LONG_PRESS_SECONDS:
-                            if xdo_key(long_keys):
-                                action = "keys %s (long-press)" % long_keys.strip()
+                            if reps == 0:
+                                # released in the gap between arming and the first
+                                # tick: the hold still owes one long stroke
+                                if xdo_key(long_keys):
+                                    action = "keys %s (long-press)" % long_keys.strip()
                             else:
-                                self.state.set(error="Unknown key combo: %s" % long_keys)
+                                action = "keys %s x%d (hold)" % (long_keys.strip(), reps)
                         else:
                             action = self.run_action(entry, "press", slot)
                 else:
@@ -2295,6 +2320,7 @@ class Daemon:
             self.poll_battery(now)
             self.poll_link(now)
             self.poll_attention(now)
+            self.tick_hold(now)
             try:
                 ready, _, _ = select.select(self.device.fds(), [], [], CONFIG_POLL)
             except (OSError, ValueError) as error:

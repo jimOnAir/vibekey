@@ -101,8 +101,9 @@ where it is raised (switch under Lighting).
 ### Erase & Interrupt
 
 ✕ Cancel is the **eraser** (owner 2026-11-18): a tap sends `BackSpace` — the
-last character; hold it ≥400 ms and the release sends `Ctrl+BackSpace` — the
-last word. The tap/hold choice resolves on release, like the knob's Enter.
+last character; holding past 400 ms starts **repeating** `Ctrl+BackSpace`
+every ~0.22 s — words vanish one after another for as long as you hold, the
+way a held backspace eats characters.
 While the Wheel is open ✕ keeps its older meaning: it closes the Wheel, and
 does not erase.
 

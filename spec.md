@@ -166,10 +166,12 @@ vs *RAN (sim)* for its own simulated clicks (§8).
   new field `"behavior"`** (§4.2). Dispatch order: `behavior` → built-in (§5);
   else `keys` → xdotool one-shot; else `command` → `bash -c` (with
   `release_command`/`release_keys` on the release edge, as upstream).
-  An entry carrying `long_press` defers both edges to release (owner
-  2026-11-18, the ✕ eraser): held < `LONG_PRESS_SECONDS` runs the press
-  action (`keys`), held ≥ it types `long_press` instead — decided exactly
-  like the knob's Enter.
+  An entry carrying `long_press` (owner 2026-11-18, the ✕ eraser): held
+  < `LONG_PRESS_SECONDS`, the release runs the press action (`keys`);
+  held ≥ it, `long_press` fires once and then **repeats every
+  `HOLD_REPEAT_SECONDS` (0.22 s) while the key stays down** — continuous
+  erase, stopped by the release edge. Preview never fires; a device
+  autorepeat press does not re-arm.
   `vibekey-config`'s `ALLOWED_BUTTON_KEYS` gains `behavior` + `keys`/`label` as
   already allowed.
 - **`knob_modes`** — **retired 2026-11-16** (owner: "мне не нужны другие
@@ -255,7 +257,8 @@ entirely** — documented known gap (ticket 6).
 ### 5.3 Agent Presets (ticket 6, on tickets 3/4's mechanisms)
 
 **Control map**: ✓ Confirm = *next Session* (fixed default), ✕ Cancel =
-*erase* (default 2026-11-18: tap `BackSpace`, hold `Ctrl+BackSpace`; the
+*erase* (default 2026-11-18: tap `BackSpace`, hold = repeating
+`Ctrl+BackSpace`; the
 `session_interrupt` preset stays in the catalogue for whoever rebinds it),
 knob **press** = toggle the **Wheel** (§5.3),
 knob **long-press** (≥400 ms, decided on the release edge) = Enter injection
