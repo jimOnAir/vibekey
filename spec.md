@@ -169,7 +169,7 @@ vs *RAN (sim)* for its own simulated clicks (§8).
   An entry carrying `long_press` (owner 2026-11-18, the ✕ eraser): held
   < `LONG_PRESS_SECONDS`, the release runs the press action (`keys`);
   held ≥ it, `long_press` fires once and then **repeats every
-  `HOLD_REPEAT_SECONDS` (0.22 s) while the key stays down** — continuous
+  `HOLD_REPEAT_SECONDS` (0.12 s) while the key stays down** — continuous
   erase, stopped by the release edge. Preview never fires; a device
   autorepeat press does not re-arm.
   `vibekey-config`'s `ALLOWED_BUTTON_KEYS` gains `behavior` + `keys`/`label` as

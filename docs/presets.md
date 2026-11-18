@@ -102,7 +102,7 @@ where it is raised (switch under Lighting).
 
 ✕ Cancel is the **eraser** (owner 2026-11-18): a tap sends `BackSpace` — the
 last character; holding past 400 ms starts **repeating** `Ctrl+BackSpace`
-every ~0.22 s — words vanish one after another for as long as you hold, the
+every ~0.12 s — words vanish one after another for as long as you hold, the
 way a held backspace eats characters.
 While the Wheel is open ✕ keeps its older meaning: it closes the Wheel, and
 does not erase.

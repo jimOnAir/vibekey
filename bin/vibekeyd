@@ -80,10 +80,11 @@ TURN_MIN_INTERVAL = 0.10  # s between applied Wheel steps: one physical detent
                           # can emit a burst of wheel reports; a same-direction
                           # tick within the window is the SAME click (owner:
                           # "the wheel is too sensitive")
-HOLD_REPEAT_SECONDS = 0.22  # while a long_press key stays held past
+HOLD_REPEAT_SECONDS = 0.12  # while a long_press key stays held past
                             # LONG_PRESS_SECONDS, its combo repeats at this
                             # cadence — continuous erase (owner 2026-11-18:
-                            # "holding should continuously delete the last word")
+                            # "holding should continuously delete the last
+                            # word", then: make the repeat faster)
 CLOSE_ID = "__close__"  # the Wheel's dedicated close slot (never a real id)
 PICKER_MAX = 12         # wheel shows up to this many root Sessions
 RAISE_DEBOUNCE = 0.35   # s of turn silence before previewing a Host (coalesces
